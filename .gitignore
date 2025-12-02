@@ -1,0 +1,29 @@
+# User requested excludes
+tests/
+test_*.py
+verify_*.py
+inspect_tool.py
+list_models.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Artifacts
+*.png
+*.wav
+*.mp3
+*.log
+*.mmd
+
+# System
+.DS_Store
