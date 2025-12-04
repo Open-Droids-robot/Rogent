@@ -35,6 +35,8 @@ else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
 import operator
+import select
+
 
 # ... (imports)
 
@@ -43,66 +45,16 @@ class AgentState(TypedDict):
     contents: Annotated[List[Any], operator.add] # Accumulate history
 
 # --- Agent Graph ---
-class AgentGraph:
-    def __init__(self, session: ClientSession):
-        # ... (init code same as before)
-        self.session = session
-        
-        # Define Tools Schema (Native Gemini/Protobuf)
-        self.tools_schema = [
-            protos.FunctionDeclaration(
-                name="get_camera_image",
-                description="Obtain an image from the robot's camera. Use this when you need to see something.",
-                parameters={'type': 'OBJECT', 'properties': {}}
-            ),
-            protos.FunctionDeclaration(
-                name="publish_cmd_vel",
-                description="Move the robot base.",
-                parameters={
-                    'type': 'OBJECT',
-                    'properties': {
-                        "linear_x": {"type": "NUMBER", "description": "Linear velocity (m/s). Positive is forward."},
-                        "angular_z": {"type": "NUMBER", "description": "Angular velocity (rad/s). Positive is left."}
-                    },
-                    'required': ["linear_x", "angular_z"]
-                }
-            ),
-            protos.FunctionDeclaration(
-                name="move_head",
-                description="Move the robot's head.",
-                parameters={
-                    'type': 'OBJECT',
-                    'properties': {
-                        "pan": {"type": "NUMBER", "description": "Pan angle in degrees."},
-                        "tilt": {"type": "NUMBER", "description": "Tilt angle in degrees."}
-                    },
-                    'required': ["pan", "tilt"]
-                }
-            ),
-            protos.FunctionDeclaration(
-                name="set_speaking_mode",
-                description="Enable or disable speaking gestures.",
-                parameters={
-                    'type': 'OBJECT',
-                    'properties': {
-                        "active": {"type": "BOOLEAN", "description": "True to enable, False to disable."}
-                    },
-                    'required': ["active"]
-                }
-            ),
-            protos.FunctionDeclaration(
-                name="search_web",
-                description="Search the web for information.",
-                parameters={
-                    'type': 'OBJECT',
-                    'properties': {
-                        "query": {"type": "STRING", "description": "The search query."}
-                    },
-                    'required': ["query"]
-                }
-            )
-        ]
+from contextlib import AsyncExitStack
 
+# ... (previous imports)
+
+# --- Agent Graph ---
+class AgentGraph:
+    def __init__(self, tool_map: dict, tools_schema: list):
+        self.tool_map = tool_map
+        self.tools_schema = tools_schema
+        
         # Initialize Model
         model_name = os.getenv('GEMINI_MODEL')
         if not model_name:
@@ -110,7 +62,7 @@ class AgentGraph:
              
         logger.info(f"Using Gemini Model: {model_name}")
         
-        # Construct Tool with ONLY functions (Native Search incompatible with functions)
+        # Construct Tool with ONLY functions
         tool_config = protos.Tool(
             function_declarations=self.tools_schema
         )
@@ -188,6 +140,20 @@ class AgentGraph:
                     tool_name = fn_call.name
                     args = {k: v for k, v in fn_call.args.items()}
                 
+                # Helper to convert protobuf types to native python types
+                def to_native(obj):
+                    # Check for MapComposite (behaves like dict)
+                    if hasattr(obj, 'items'):
+                        return {k: to_native(v) for k, v in obj.items()}
+                    # Check for RepeatedComposite (behaves like list)
+                    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes)):
+                        return [to_native(i) for i in obj]
+                    else:
+                        return obj
+
+                # Convert args to native types
+                args = to_native(args)
+                
                 # Handle Hallucinations / Mappings
                 if tool_name == 'search':
                     logger.info("Mapping 'search' tool call to 'search_web'")
@@ -201,8 +167,21 @@ class AgentGraph:
                 
                 logger.info(f"Executing Tool: {tool_name} with {args}")
                 
+                session = self.tool_map.get(tool_name)
+                if not session:
+                    logger.error(f"Tool {tool_name} not found in tool_map.")
+                    new_parts.append(
+                        protos.Part(
+                            function_response=protos.FunctionResponse(
+                                name=tool_name,
+                                response={'error': f"Tool {tool_name} not found."}
+                            )
+                        )
+                    )
+                    continue
+
                 try:
-                    result = await self.session.call_tool(tool_name, arguments=args)
+                    result = await session.call_tool(tool_name, arguments=args)
                     result_text = ""
                     if hasattr(result, 'content') and result.content:
                         result_text = result.content[0].text
@@ -228,8 +207,6 @@ class AgentGraph:
                         )
                     )
         
-        # Function responses are sent as 'function' role (or part of user/function turn)
-        # In the new API, we typically send them as a separate content block with role='function'
         return {"contents": [{"role": "function", "parts": new_parts}]}
 
     def should_continue(self, state: AgentState):
@@ -265,13 +242,6 @@ class AgentGraph:
         # Create new user content
         new_user_content = {"role": "user", "parts": user_parts}
         
-        # Initialize graph state with history + new input
-        # Note: Since we use operator.add, if we pass the WHOLE history here, 
-        # it might duplicate if the graph state persists?
-        # No, we are calling ainvoke on a compiled graph. 
-        # If we pass 'contents', it initializes the state.
-        # So we should pass history + [new_user_content]
-        
         current_contents = history + [new_user_content]
         inputs = {"contents": current_contents}
         
@@ -302,6 +272,7 @@ class AgentGraph:
 
 
 # --- Main Agent ---
+# --- Main Agent ---
 class Agent:
     def __init__(self, robot_name="Orin"):
         self.robot_name = robot_name
@@ -318,43 +289,136 @@ class Agent:
         self.history = [] # Maintain conversation history
         
     async def run(self):
-        logger.info(f"Starting Agent {self.robot_name} (LangGraph + Native Gemini)...")
+        logger.info(f"Starting Agent {self.robot_name} (LangGraph + Multi-Server MCP)...")
         self.audio.start()
         
-        server_params = StdioServerParameters(
-            command=sys.executable,
-            args=["src/robot_tools_server.py"],
-            env=None
-        )
-        
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                
-                self.graph = AgentGraph(session)
-                
-                logger.info("Agent is READY. Speak into the microphone.")
-                
-                while True:
-                    while not self.audio.audio_queue.empty():
-                        frame_bytes = self.audio.audio_queue.get()
-                        is_speech = self.audio.vad.is_speech(frame_bytes, self.audio.sample_rate)
-                        
-                        if is_speech:
-                            if not self.is_listening:
-                                logger.info("Speech detected...")
-                                self.is_listening = True
-                            self.audio_buffer.extend(frame_bytes)
-                            self.silence_frames = 0
-                        else:
-                            if self.is_listening:
-                                self.silence_frames += 1
-                                if self.silence_frames > 33:
-                                    logger.info("Silence detected. Processing speech...")
-                                    await self.process_speech()
-                                    self.reset_listening()
+        # Define servers to connect to
+        servers = {
+            "local": {
+                "command": sys.executable,
+                "args": ["src/robot_tools_server.py"],
+                "env": None
+            },
+            "ros": {
+                "command": sys.executable,
+                "args": ["ros-mcp-server/server.py"], 
+                "env": {
+                    **os.environ.copy(),
+                    "PYTHONPATH": os.path.join(os.getcwd(), "ros-mcp-server")
+                }
+            }
+        }
+
+        async with AsyncExitStack() as stack:
+            tool_map = {}
+            tools_schema = []
+
+            for name, config in servers.items():
+                logger.info(f"Connecting to {name} MCP server...")
+                try:
+                    server_params = StdioServerParameters(
+                        command=config["command"],
+                        args=config["args"],
+                        env=config["env"]
+                    )
                     
-                    await asyncio.sleep(0.01)
+                    # Create client (stdio_client returns a context manager)
+                    read, write = await stack.enter_async_context(stdio_client(server_params))
+                    session = await stack.enter_async_context(ClientSession(read, write))
+                    await session.initialize()
+                    
+                    # List tools
+                    result = await session.list_tools()
+                    
+                    for tool in result.tools:
+                        logger.info(f"  - Found tool: {tool.name}")
+                        tool_map[tool.name] = session
+                        
+                        # Convert MCP tool to Gemini FunctionDeclaration
+                        props = {}
+                        required = []
+                        if tool.inputSchema and 'properties' in tool.inputSchema:
+                            for prop_name, prop_def in tool.inputSchema['properties'].items():
+                                # Map JSON schema types to Gemini types
+                                type_map = {
+                                    "string": "STRING",
+                                    "integer": "NUMBER", # Gemini uses NUMBER for both
+                                    "number": "NUMBER",
+                                    "boolean": "BOOLEAN",
+                                    "array": "ARRAY",
+                                    "object": "OBJECT"
+                                }
+                                p_type = type_map.get(prop_def.get('type'), "STRING")
+                                prop_schema = {
+                                    "type": p_type,
+                                    "description": prop_def.get('description', '')
+                                }
+                                if p_type == "ARRAY":
+                                    # Handle array items
+                                    items_def = prop_def.get('items', {})
+                                    item_type = type_map.get(items_def.get('type'), "STRING")
+                                    prop_schema["items"] = {"type": item_type}
+                                    
+                                props[prop_name] = prop_schema
+                            
+                            if 'required' in tool.inputSchema:
+                                required = tool.inputSchema['required']
+
+                        fd = protos.FunctionDeclaration(
+                            name=tool.name,
+                            description=tool.description,
+                            parameters={
+                                'type': 'OBJECT',
+                                'properties': props,
+                                'required': required
+                            }
+                        )
+                        tools_schema.append(fd)
+                        
+                except Exception as e:
+                    logger.error(f"Failed to connect to {name} server: {e}")
+
+            if not tool_map:
+                logger.error("No tools loaded! Exiting.")
+                return
+
+            # Initialize Graph with aggregated tools
+            self.graph = AgentGraph(tool_map, tools_schema)
+            
+            logger.info("Agent is READY. Speak into the microphone or type text.")
+            
+            while True:
+                # Check stdin
+                try:
+                    if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+                        line = sys.stdin.readline()
+                        if line:
+                            text = line.strip()
+                            if text:
+                                logger.info(f"Text Input: '{text}'")
+                                await self.process_input(text)
+                except Exception:
+                    pass
+
+                while not self.audio.audio_queue.empty():
+                    frame_bytes = self.audio.audio_queue.get()
+                    is_speech = self.audio.vad.is_speech(frame_bytes, self.audio.sample_rate)
+                    
+                    if is_speech:
+                        if not self.is_listening:
+                            logger.info("Speech detected...")
+                            self.is_listening = True
+                        self.audio_buffer.extend(frame_bytes)
+                        self.silence_frames = 0
+                    else:
+                        if self.is_listening:
+                            self.silence_frames += 1
+                            if self.silence_frames > 33:
+                                logger.info("Silence detected. Processing speech...")
+                                await self.process_speech()
+                                self.reset_listening()
+                
+                await asyncio.sleep(0.01)
 
     def reset_listening(self):
         self.is_listening = False
@@ -368,7 +432,9 @@ class Agent:
             return
             
         logger.info(f"Transcribed: '{text}'")
-        
+        await self.process_input(text)
+
+    async def process_input(self, text):
         try:
             # Pass history to process
             response_text, updated_history = await self.graph.process(text, self.history)
