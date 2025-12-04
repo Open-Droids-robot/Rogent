@@ -6,7 +6,13 @@ import os
 import numpy as np
 from PIL import Image
 import io
+import cv2
+import time
 from googlesearch import search as google_search
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+from colorama import Fore, Style, init
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +68,80 @@ def get_camera_image() -> str:
         cap.release()
 
 
+
+@mcp.tool()
+def detect_objects() -> str:
+    """
+    Capture an image and identify objects with normalized coordinates.
+    Returns a JSON string: [{"point": [y, x], "label": "name"}, ...]
+    """
+    logger.info(f"{Fore.MAGENTA}EXECUTING: detect_objects{Style.RESET_ALL}")
+
+    # 1. Capture Image (Reuse logic or call internal helper)
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        return "Error: Camera failed"
+
+    try:
+        for _ in range(15):
+            cap.read()
+        ret, frame = cap.read()
+        if not ret:
+            return "Error: Capture failed"
+
+        # Save for debug
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        cv2.imwrite(f"outputs/detection_{timestamp}.jpg", frame)
+
+        # Convert for Gemini
+        _, buffer = cv2.imencode(".jpg", frame)
+        image_bytes = buffer.tobytes()
+
+    finally:
+        cap.release()
+
+    # 2. Send to Gemini for Processing
+    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+
+    PROMPT = """
+    Identify objects. Return ONLY valid JSON.
+    Format: [{"point": [y, x], "label": "name"}, ...]
+    Points are [y, x] normalized 0-1000.
+    """
+
+    try:
+        # Use gemini-2.0-flash-exp for speed/vision or fall back to 1.5-flash
+        response = client.models.generate_content(
+            model="gemini-robotics-er-1.5-preview",
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
+                PROMPT,
+            ],
+        )
+        return response.text
+    except Exception as e:
+        logger.error(f"Gemini Error: {e}")
+        return f"Error analyzing image: {e}"
+
+
+@mcp.tool()
+def move_camera(direction: str) -> str:
+    """
+    Simulate moving the camera/robot.
+
+    Args:
+        direction: Description of where to move (e.g. "left", "right", "pan 30 degrees").
+    """
+    logger.info(
+        f"{Fore.MAGENTA}EXECUTING: move_camera(direction='{direction}'){Style.RESET_ALL}"
+    )
+    print(
+        f"\n{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
+    )
+    print(f"{Fore.YELLOW}Waiting 5 seconds for manual adjustment...{Style.RESET_ALL}")
+    time.sleep(5)
+    print(f"{Fore.GREEN}Resuming...{Style.RESET_ALL}\n")
+    return f"Camera moved {direction}. You can now capture an image."
 
 
 
