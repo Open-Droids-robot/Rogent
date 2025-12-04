@@ -21,18 +21,48 @@ def get_camera_image() -> str:
     Obtain an image from the robot's camera.
     Returns a base64 encoded JPEG string of the image.
     """
-    logger.info("EXECUTING: get_camera_image")
-    
-    # Generate a dummy image (random noise or solid color)
-    # In a real scenario, this would capture from cv2.VideoCapture
-    img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-    img = Image.fromarray(img_array)
-    
-    buffered = io.BytesIO()
-    img.save(buffered, format="JPEG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
-    return img_str
+    logger.info(f"{Fore.MAGENTA}EXECUTING: get_camera_image{Style.RESET_ALL}")
+
+    # Initialize camera (0 is usually default webcam)
+    cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        logger.error("Could not open camera")
+        return "Error: Could not open camera."
+
+    try:
+        # Allow camera to warm up
+        for _ in range(15):  # Warm up more frames
+            cap.read()
+
+        ret, frame = cap.read()
+
+        if not ret:
+            logger.error("Failed to capture frame")
+            return "Error: Failed to capture frame."
+
+        # Convert BGR (OpenCV) to RGB (PIL)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb_frame)
+
+        # Save to outputs folder with timestamp
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"outputs/captured_image_{timestamp}.jpg"
+        img.save(filename)
+        logger.info(f"Image saved to {filename}")
+
+        # Convert to Base64
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+        return img_str
+
+    finally:
+        cap.release()
+
+
+
 
 
 
