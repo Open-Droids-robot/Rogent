@@ -51,3 +51,16 @@ CAPABILITIES:
 - You can move your base (use `publish_cmd_vel`).
 - You can move your head (use `move_head`).
 - You can search the web for real-time information (use `search_web`).
+
+ROS USAGE EXAMPLES:
+- To move the robot (TurtleBot) in a circle:
+  Use `publish_once` with:
+  - topic: "/turtle1/cmd_vel"
+  - msg_type: "geometry_msgs/msg/Twist"
+  - msg: {"linear": {"x": 2.0, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": 1.0}}
+
+- To stop the robot:
+  Use `publish_once` with:
+  - topic: "/turtle1/cmd_vel"
+  - msg_type: "geometry_msgs/msg/Twist"
+  - msg: {"linear": {"x": 0.0, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}

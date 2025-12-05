@@ -34,29 +34,7 @@ def get_camera_image() -> str:
     
     return img_str
 
-@mcp.tool()
-def publish_cmd_vel(linear_x: float, angular_z: float) -> str:
-    """
-    Publish to cmd_vel to move the robot base.
-    
-    Args:
-        linear_x: Linear velocity (m/s). Positive is forward.
-        angular_z: Angular velocity (rad/s). Positive is left.
-    """
-    logger.info(f"EXECUTING: publish_cmd_vel(linear_x={linear_x}, angular_z={angular_z})")
-    return f"Robot moving: linear={linear_x}, angular={angular_z}"
 
-@mcp.tool()
-def move_head(pan: float, tilt: float) -> str:
-    """
-    Move the robot's head.
-    
-    Args:
-        pan: Pan angle in degrees (left/right).
-        tilt: Tilt angle in degrees (up/down).
-    """
-    logger.info(f"EXECUTING: move_head(pan={pan}, tilt={tilt})")
-    return f"Head moved to: pan={pan}, tilt={tilt}"
 
 @mcp.tool()
 def set_speaking_mode(active: bool) -> str:
