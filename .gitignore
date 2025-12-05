@@ -4,6 +4,8 @@ test_*.py
 verify_*.py
 inspect_tool.py
 list_models.py
+check_genai.py
+check_search.py
 
 # Python
 __pycache__/
