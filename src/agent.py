@@ -7,6 +7,8 @@ import base64
 import io
 from PIL import Image
 from dotenv import load_dotenv
+from colorama import Fore, Style, init
+
 
 from typing import Annotated, TypedDict, List, Union, Any
 from langgraph.graph import StateGraph, END
@@ -292,19 +294,26 @@ class Agent:
         logger.info(f"Starting Agent {self.robot_name} (LangGraph + Multi-Server MCP)...")
         self.audio.start()
         
+        # Determine paths relative to this script
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(base_dir)
+        
+        robot_server_path = os.path.join(base_dir, "robot_tools_server.py")
+        ros_server_path = os.path.join(project_root, "ros-mcp-server", "server.py")
+        
         # Define servers to connect to
         servers = {
             "local": {
                 "command": sys.executable,
-                "args": ["src/robot_tools_server.py"],
-                "env": None
+                "args": [robot_server_path],
+                "env": {**os.environ.copy(), "PYTHONPATH": base_dir}
             },
             "ros": {
                 "command": sys.executable,
-                "args": ["ros-mcp-server/server.py"], 
+                "args": [ros_server_path], 
                 "env": {
                     **os.environ.copy(),
-                    "PYTHONPATH": os.path.join(os.getcwd(), "ros-mcp-server")
+                    "PYTHONPATH": os.path.join(project_root, "ros-mcp-server")
                 }
             }
         }
@@ -329,9 +338,10 @@ class Agent:
                     
                     # List tools
                     result = await session.list_tools()
+                    logger.info(f"Connected to {name} server. Found {len(result.tools)} tools.")
                     
                     for tool in result.tools:
-                        logger.info(f"  - Found tool: {tool.name}")
+                        logger.info(f"  - Adding tool: {tool.name} (from {name})")
                         tool_map[tool.name] = session
                         
                         # Convert MCP tool to Gemini FunctionDeclaration

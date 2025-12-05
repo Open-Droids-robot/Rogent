@@ -18,3 +18,5 @@ langgraph
 langchain
 langchain-google-genai
 langchain-community
+opencv-python
+colorama

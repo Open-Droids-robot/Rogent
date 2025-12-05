@@ -1,6 +1,5 @@
 from mcp.server.fastmcp import FastMCP
 import logging
-from duckduckgo_search import DDGS
 import base64
 import os
 import numpy as np
@@ -9,10 +8,16 @@ import io
 import cv2
 import time
 from googlesearch import search as google_search
+import google.generativeai as genai
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from colorama import Fore, Style, init
+
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    DDGS = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +75,7 @@ def get_camera_image() -> str:
 
 
 @mcp.tool()
+@mcp.tool()
 def detect_objects() -> str:
     """
     Capture an image and identify objects with normalized coordinates.
@@ -104,15 +110,16 @@ def detect_objects() -> str:
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
     PROMPT = """
-    Identify objects. Return ONLY valid JSON.
-    Format: [{"point": [y, x], "label": "name"}, ...]
-    Points are [y, x] normalized 0-1000.
+    The label returned should be an identifying name for the object detected.
+    The answer should follow the json format: [{"point": <point>,
+    "label": <label1>}, ...]. The points are in [y, x] format
+    normalized to 0-1000.
     """
 
     try:
         # Use gemini-2.0-flash-exp for speed/vision or fall back to 1.5-flash
         response = client.models.generate_content(
-            model="gemini-robotics-er-1.5-preview",
+            model=os.getenv("SCENE_UNDERSTANDING_MODEL"),
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
                 PROMPT,
@@ -168,19 +175,19 @@ def search_web(query: str) -> str:
     """
     logger.info(f"EXECUTING: search_web(query='{query}')")
     
-    # Try DuckDuckGo (via ddgs package)
-    try:
-        from ddgs import DDGS
-        results = DDGS().text(query, max_results=3)
-        if results:
-            summary = "Search Results (DuckDuckGo):\n"
-            for r in results:
-                summary += f"- {r['title']}: {r['body']}\n"
-            return summary
-    except ImportError:
-        logger.warning("ddgs module not found. Falling back to HTML Scraping.")
-    except Exception as e:
-        logger.warning(f"DuckDuckGo search failed: {e}. Falling back to HTML Scraping.")
+    # Try DuckDuckGo
+    if DDGS:
+        try:
+            results = DDGS().text(query, max_results=3)
+            if results:
+                summary = "Search Results (DuckDuckGo):\n"
+                for r in results:
+                    summary += f"- {r['title']}: {r['body']}\n"
+                return summary
+        except Exception as e:
+            logger.warning(f"DuckDuckGo search failed: {e}. Falling back to HTML Scraping.")
+    else:
+        logger.warning("duckduckgo_search module not found. Falling back to HTML Scraping.")
 
     # Fallback 1: DuckDuckGo HTML Scraping (Requests + BS4)
     try:
