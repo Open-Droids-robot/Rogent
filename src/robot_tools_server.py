@@ -1,12 +1,10 @@
 from mcp.server.fastmcp import FastMCP
 import logging
 from duckduckgo_search import DDGS
-import base64
-import os
-import numpy as np
-from PIL import Image
-import io
 from googlesearch import search as google_search
+import pkgutil
+import importlib
+import tools
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -15,25 +13,22 @@ logger = logging.getLogger("robot_mcp")
 # Create the MCP server
 mcp = FastMCP("RobotTools")
 
-@mcp.tool()
-def get_camera_image() -> str:
-    """
-    Obtain an image from the robot's camera.
-    Returns a base64 encoded JPEG string of the image.
-    """
-    logger.info("EXECUTING: get_camera_image")
-    
-    # Generate a dummy image (random noise or solid color)
-    # In a real scenario, this would capture from cv2.VideoCapture
-    img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-    img = Image.fromarray(img_array)
-    
-    buffered = io.BytesIO()
-    img.save(buffered, format="JPEG")
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
-    return img_str
+# Load tools from the tools package
+def load_tools(mcp_instance):
+    package = tools
+    prefix = package.__name__ + "."
+    for _, name, _ in pkgutil.iter_modules(package.__path__, prefix):
+        try:
+            module = importlib.import_module(name)
+            if hasattr(module, "register"):
+                module.register(mcp_instance)
+                logger.info(f"Registered tools from module: {name}")
+            else:
+                logger.warning(f"Module {name} does not have a register function")
+        except Exception as e:
+            logger.error(f"Failed to load module {name}: {e}")
 
+load_tools(mcp)
 
 
 @mcp.tool()
