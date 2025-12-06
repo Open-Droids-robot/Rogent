@@ -3,6 +3,7 @@ import logging
 import asyncio
 import os
 import tempfile
+import sys
 from gtts import gTTS
 
 logger = logging.getLogger(__name__)
@@ -50,31 +51,43 @@ class Synthesizer:
         os.remove(temp_filename)
 
     async def _play_audio(self, filename):
-        # Try GStreamer first (Jetson standard)
-        player_cmd = ["gst-launch-1.0", "playbin", f"uri=file://{filename}"]
+        player_cmds = []
+
+        if sys.platform == "darwin":
+            player_cmds.append(["afplay", filename])
         
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *player_cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-            await process.wait()
-        except FileNotFoundError:
-            # Try mpg123
+        # Add Linux/standard players
+        player_cmds.append(["gst-launch-1.0", "playbin", f"uri=file://{filename}"])
+        player_cmds.append(["mpg123", filename])
+        player_cmds.append(["ffplay", "-nodisp", "-autoexit", filename])
+
+        played = False
+        for cmd in player_cmds:
             try:
+                # Filter out None or empty commands if logic added dynamically
+                if not cmd: continue
+                
                 process = await asyncio.create_subprocess_exec(
-                    "mpg123", filename,
+                    *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL
                 )
                 await process.wait()
+                if process.returncode == 0:
+                    played = True
+                    break
             except FileNotFoundError:
-                logger.error("No audio player found! Please install mpg123 or gstreamer.")
+                continue
+            except Exception as e:
+                logger.warning(f"Audio player {cmd[0]} failed: {e}")
+        
+        if not played:
+            logger.error(f"No suitable audio player found. Tried: {[c[0] for c in player_cmds]}")
 
 if __name__ == "__main__":
     async def main():
+        logging.basicConfig(level=logging.INFO)
         s = Synthesizer()
-        await s.speak("Testing fallback audio.")
+        await s.speak("Testing audio playback.")
     
     asyncio.run(main())
