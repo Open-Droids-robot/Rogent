@@ -5,7 +5,9 @@ A robust, always-on voice agent designed for the **Jetson Orin AGX**, powered by
 ## 🚀 Features
 
 -   **Advanced LLM Brain**: Uses Google's **Gemini 2.0 Flash Exp** for multimodal understanding and fast responses.
+-   **Scene Understanding**: Powered by **Gemini Robotics ER** for visual reasoning, object detection, spatial analysis, and trajectory planning.
 -   **Agentic Workflow**: Orchestrated by **LangGraph** for robust state management and tool execution loops.
+-   **Observability**: Integrated **Weave** for tracing and logging agent interactions (agent_v2.py).
 -   **Real-time Voice Interaction**:
     -   **STT**: Local transcription using `faster-whisper` with WebRTC VAD for precise voice detection.
     -   **TTS**: High-quality neural voices via `edge-tts` with `gTTS` fallback.
@@ -47,6 +49,7 @@ graph TD
 -   **OS**: Ubuntu 20.04/22.04.
 -   **Python**: 3.10+.
 -   **API Keys**: Google Gemini API Key.
+-   **Optional**: Weave account for observability.
 
 ## 📦 Installation
 
@@ -79,9 +82,11 @@ graph TD
 
 1.  **Start the Agent**
     This command launches the MCP server, initializes the audio subsystem, and connects to Gemini.
-    ```bash
+    
     python src/agent.py
-    ```
+        
+    Or use the new version with Weave tracing:
+    python src/agent_v2.py
 
 2.  **Interaction**
     -   Speak clearly into the microphone.
@@ -91,13 +96,59 @@ graph TD
         -   "Look up 20 degrees."
         -   "Take a picture."
         -   "Search the web for the latest robotics news."
+        -   **"What objects do you see?"** (Scene Understanding Mode)
+        -   **"Plan a trajectory to reach that cup."** (Trajectory Planning)
 
-## 📂 Project Structure
+## 🎯 Scene Understanding Mode
+
+The agent can switch into **Scene Understanding Mode** when visual reasoning is needed. This mode uses Gemini Robotics ER to:
+
+- Detect and locate objects in the camera view
+- Analyze spatial relationships
+- Generate reachability checks
+- Plan movement trajectories
+
+Visualization outputs are saved to the `outputs/` directory with timestamps:
+- `captured_image_*.jpg` - Raw camera captures
+- `detection_vis_*.jpg` - Object detection visualizations
+- `trajectory_vis_*.jpg` - Trajectory planning visualizations
+
+## �� Observability with Weave
+
+The `agent_v2.py` version includes **Weave** integration for comprehensive tracing and observability of agent interactions. Weave automatically captures:
+
+- **Tool Execution**: All MCP tool calls and their results
+- **Image Captures**: Camera images and visualization outputs are logged to traces
+- **Conversation Flow**: Complete interaction history with the LLM
+- **Function Calls**: Detailed tracking of agent decision-making
+
+### Setup
+
+1. **Install Weave** (already included in `requirements.txt`):
+2. **Initialize Weave** (optional - runs automatically in `agent_v2.py`):n
+3. **View Traces**:
+- Traces are automatically sent to Weave's cloud service
+- Visit [wandb.ai](https://wandb.ai) to view your traces (Weave is built on Weights & Biases)
+- You can also run a local Weave server for private tracing
+
+### What Gets Traced
+
+- **`tool_node()`**: Every tool execution (camera captures, web searches, robot movements)
+- **`process()`**: Main conversation processing with full context
+- **Images**: Camera captures and visualization outputs (`detection_vis_*.jpg`, `trajectory_vis_*.jpg`)
+
+### Usage
+
+Simply run `agent_v2.py` instead of `agent.py`:
+python src/agent_v2.pyAll interactions will be automatically traced. You can view the traces in the Weave dashboard to debug agent behavior, analyze tool usage patterns, and optimize the agent's decision-making process.
+
+## �� Project Structure
 
 ```
 senses-mcp/
 ├── src/
 │   ├── agent.py              # Main entry point & LangGraph orchestration
+│   ├── agent_v2.py           # New agent version with Weave tracing
 │   ├── audio_manager.py      # Microphone input & VAD handling
 │   ├── robot_tools_server.py # MCP Server implementation (Tools)
 │   ├── synthesizer.py        # TTS logic (EdgeTTS/gTTS)
