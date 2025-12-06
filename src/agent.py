@@ -69,12 +69,36 @@ class AgentGraph:
             function_declarations=self.tools_schema
         )
         
-        # Load System Instruction from file
+        # Load System Instruction from files
         try:
-            with open("persona.txt", "r") as f:
-                system_instruction = f.read()
-        except FileNotFoundError:
-            logger.warning("persona.txt not found, using default.")
+            # Determine paths relative to this script
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(base_dir)
+            prompts_dir = os.path.join(project_root, "prompts")
+            
+            persona_path = os.path.join(prompts_dir, "persona.txt")
+            perception_path = os.path.join(prompts_dir, "perception.txt")
+            
+            system_parts = []
+            
+            # Load persona.txt
+            if os.path.exists(persona_path):
+                with open(persona_path, "r") as f:
+                    system_parts.append(f.read())
+            else:
+                logger.warning("prompts/persona.txt not found, using default.")
+                system_parts.append("You are a helpful robot assistant named Orin.")
+            
+            # Load perception.txt
+            if os.path.exists(perception_path):
+                with open(perception_path, "r") as f:
+                    system_parts.append(f.read())
+            else:
+                logger.warning("prompts/perception.txt not found.")
+            
+            system_instruction = "\n\n".join(system_parts)
+        except Exception as e:
+            logger.error(f"Error loading system instructions: {e}")
             system_instruction = "You are a helpful robot assistant named Orin."
 
         self.model = genai.GenerativeModel(
