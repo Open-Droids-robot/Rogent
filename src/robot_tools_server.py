@@ -3,7 +3,7 @@ import logging
 import base64
 import os
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 import cv2
 import time
@@ -13,6 +13,8 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from colorama import Fore, Style, init
+import glob
+import json
 
 try:
     from duckduckgo_search import DDGS
@@ -71,65 +73,7 @@ def get_camera_image() -> str:
 
     finally:
         cap.release()
-
-
-
-@mcp.tool()
-@mcp.tool()
-def detect_objects() -> str:
-    """
-    Capture an image and identify objects with normalized coordinates.
-    Returns a JSON string: [{"point": [y, x], "label": "name"}, ...]
-    """
-    logger.info(f"{Fore.MAGENTA}EXECUTING: detect_objects{Style.RESET_ALL}")
-
-    # 1. Capture Image (Reuse logic or call internal helper)
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        return "Error: Camera failed"
-
-    try:
-        for _ in range(15):
-            cap.read()
-        ret, frame = cap.read()
-        if not ret:
-            return "Error: Capture failed"
-
-        # Save for debug
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        cv2.imwrite(f"outputs/detection_{timestamp}.jpg", frame)
-
-        # Convert for Gemini
-        _, buffer = cv2.imencode(".jpg", frame)
-        image_bytes = buffer.tobytes()
-
-    finally:
-        cap.release()
-
-    # 2. Send to Gemini for Processing
-    client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-
-    PROMPT = """
-    The label returned should be an identifying name for the object detected.
-    The answer should follow the json format: [{"point": <point>,
-    "label": <label1>}, ...]. The points are in [y, x] format
-    normalized to 0-1000.
-    """
-
-    try:
-        # Use gemini-2.0-flash-exp for speed/vision or fall back to 1.5-flash
-        response = client.models.generate_content(
-            model=os.getenv("SCENE_UNDERSTANDING_MODEL"),
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
-                PROMPT,
-            ],
-        )
-        return response.text
-    except Exception as e:
-        logger.error(f"Gemini Error: {e}")
-        return f"Error analyzing image: {e}"
-
+        
 
 @mcp.tool()
 def move_camera(direction: str) -> str:
@@ -248,6 +192,178 @@ def search_web(query: str) -> str:
     except Exception as e:
         logger.error(f"Google search failed: {e}")
         return f"Search failed: {e}"
+
+@mcp.tool()
+def plot_detections(detections_json: str) -> str:
+    """
+    Visualize detected objects by drawing points/labels on the last captured image.
+    
+    Args:
+        detections_json: A JSON string list of objects.
+                         Example: '[{"point": [500, 500], "label": "cup"}]'
+                         Points must be [y, x] normalized to 0-1000.
+    """
+    logger.info(f"EXECUTING: plot_detections")
+    
+    # 1. Find the most recent image in outputs/
+    try:
+        list_of_files = glob.glob('outputs/captured_image_*.jpg') 
+        if not list_of_files:
+            return "Error: No recent image found to plot on."
+        
+        # Get the latest file created
+        latest_file = max(list_of_files, key=os.path.getctime)
+        logger.info(f"Plotting on: {latest_file}")
+        
+        # 2. Load Image with Pillow
+        img = Image.open(latest_file)
+        width, height = img.size
+        draw = ImageDraw.Draw(img)
+        
+        # Setup Font (try system fonts or default)
+        try:
+             # Try Mac font first
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 40)
+        except IOError:
+            try:
+                # Try Linux/Windows common font
+                font = ImageFont.truetype("arial.ttf", 40)
+            except IOError:
+                font = ImageFont.load_default()
+
+        # 3. Parse JSON
+        detections = json.loads(detections_json)
+
+        # 4. Plot Logic (from your plot_objects.py)
+        point_color = (66, 133, 244) # Google Blue
+        text_color = "white"
+        outline_color = "white"
+
+        for item in detections:
+            # Check for valid point format
+            if 'point' not in item: continue
+            
+            # [y, x] normalized
+            norm_y, norm_x = item['point']
+            label = item.get('label', 'object')
+            
+            # Convert to pixels
+            x = int((norm_x / 1000) * width)
+            y = int((norm_y / 1000) * height)
+            
+            # Draw Point
+            r = 15
+            draw.ellipse((x-r, y-r, x+r, y+r), fill=point_color, outline=outline_color, width=4)
+            
+            # Draw Label
+            bbox = draw.textbbox((0, 0), label, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            text_x = x + r + 10
+            text_y = y - (text_height / 2)
+            
+            pad_x, pad_y = 8, 4
+            draw.rounded_rectangle(
+                (text_x - pad_x, text_y - pad_y, text_x + text_width + pad_x, text_y + text_height + pad_y),
+                radius=5, fill=point_color
+            )
+            draw.text((text_x, text_y), label, fill=text_color, font=font)
+
+        # 5. Save Output
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        outfile = f"outputs/detection_vis_{timestamp}.jpg"
+        img.save(outfile)
+        logger.info(f"Saved visualization to {outfile}")
+        
+        return f"Visualization saved to {outfile}"
+
+    except Exception as e:
+        logger.error(f"Plotting failed: {e}")
+        return f"Error: {e}"
+
+@mcp.tool()
+def plot_trajectory(trajectory_json: str) -> str:
+    """
+    Visualize a movement trajectory by drawing lines/points on the last captured image.
+    
+    Args:
+        trajectory_json: A JSON string list of steps.
+                         Example: '[{"coordinates": [500, 500], "step": "0"}, ...]'
+                         Coordinates must be [y, x] normalized to 0-1000.
+    """
+    logger.info(f"EXECUTING: plot_trajectory")
+    
+    try:
+        # 1. Find the most recent image (or the one we just plotted objects on)
+        # We prefer 'detection_vis_' if it exists (so we layer trajectory ON TOP of detections)
+        # Otherwise fallback to raw 'captured_image_'
+        
+        vis_files = glob.glob('outputs/detection_vis_*.jpg')
+        raw_files = glob.glob('outputs/captured_image_*.jpg')
+        
+        target_file = None
+        
+        # Priority: Latest visualization -> Latest raw capture
+        if vis_files:
+            target_file = max(vis_files, key=os.path.getctime)
+        elif raw_files:
+            target_file = max(raw_files, key=os.path.getctime)
+            
+        if not target_file:
+            return "Error: No recent image found to plot trajectory on."
+            
+        logger.info(f"Plotting trajectory on: {target_file}")
+        
+        # 2. Load Image
+        img = Image.open(target_file)
+        width, height = img.size
+        draw = ImageDraw.Draw(img)
+        
+        # 3. Parse JSON
+        try:
+            steps = json.loads(trajectory_json)
+        except json.JSONDecodeError:
+            return "Error: Invalid JSON string."
+
+        # 4. Draw Logic
+        trajectory_color = (52, 168, 83) # Google Green
+        outline_color = "white"
+        
+        pixel_points = []
+        
+        for item in steps:
+            if "coordinates" not in item: continue
+            
+            # [y, x] normalized
+            norm_y, norm_x = item['coordinates']
+            
+            x = int((norm_x / 1000) * width)
+            y = int((norm_y / 1000) * height)
+            pixel_points.append((x, y))
+            
+        # Draw Lines
+        if len(pixel_points) > 1:
+            draw.line(pixel_points, fill=trajectory_color, width=5)
+            
+        # Draw Points
+        for x, y in pixel_points:
+            r = 6
+            draw.ellipse((x-r, y-r, x+r, y+r), fill=trajectory_color, outline=outline_color, width=2)
+
+        # 5. Save Output
+        # We overwrite the target file or create a new "final" one? 
+        # Creating a new one preserves history.
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        outfile = f"outputs/trajectory_vis_{timestamp}.jpg"
+        img.save(outfile)
+        logger.info(f"Saved trajectory visualization to {outfile}")
+        
+        return f"Trajectory plotted and saved to {outfile}"
+
+    except Exception as e:
+        logger.error(f"Trajectory plotting failed: {e}")
+        return f"Error: {e}"
 
 if __name__ == "__main__":
     # Run the server
