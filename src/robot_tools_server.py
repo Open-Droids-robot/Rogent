@@ -120,12 +120,12 @@ def move_camera(direction: str) -> str:
     logger.info(
         f"EXECUTING: move_camera(direction='{direction}')"
     )
-    print(
-        f"\n{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
+    logger.info(
+        f"{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
     )
-    print(f"{Fore.YELLOW}Waiting 5 seconds for manual adjustment...{Style.RESET_ALL}")
+    logger.info(f"{Fore.YELLOW}Waiting 5 seconds for manual adjustment...{Style.RESET_ALL}")
     time.sleep(5)
-    print(f"{Fore.GREEN}Resuming...{Style.RESET_ALL}\n")
+    logger.info(f"{Fore.GREEN}Resuming...{Style.RESET_ALL}")
     return f"Camera moved {direction}. You can now capture an image."
 
 @mcp.tool()
