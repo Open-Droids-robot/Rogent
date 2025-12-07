@@ -38,7 +38,31 @@ def trace_image(image: Image.Image, label: str = "tool_image"):
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+init(autoreset=True)
+
+class ColoredFormatter(logging.Formatter):
+    def format(self, record):
+        # Format the message using the standard formatter first
+        formatted_message = super().format(record)
+        
+        # Apply colors based on content
+        msg = record.getMessage()
+        if "Executing Tool:" in msg:
+            return f"{Fore.CYAN}{formatted_message}{Style.RESET_ALL}"
+        elif "Agent Response:" in msg:
+            return f"{Fore.GREEN}{formatted_message}{Style.RESET_ALL}"
+        elif "Text Input:" in msg or "Transcribed:" in msg:
+            return f"{Fore.YELLOW}{formatted_message}{Style.RESET_ALL}"
+        elif record.levelno >= logging.ERROR:
+             return f"{Fore.RED}{formatted_message}{Style.RESET_ALL}"
+        elif record.levelno == logging.WARNING:
+             return f"{Fore.MAGENTA}{formatted_message}{Style.RESET_ALL}"
+             
+        return formatted_message
+
+handler = logging.StreamHandler()
+handler.setFormatter(ColoredFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 logger = logging.getLogger("AgentV2")
 
 # Configure Gemini with modern SDK

@@ -22,7 +22,27 @@ except ImportError:
     DDGS = None
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+init(autoreset=True)
+
+class ColoredFormatter(logging.Formatter):
+    def format(self, record):
+        # Format the message using the standard formatter first
+        formatted_message = super().format(record)
+        
+        # Apply colors based on content
+        msg = record.getMessage()
+        if "EXECUTING:" in msg:
+             return f"{Fore.CYAN}{formatted_message}{Style.RESET_ALL}"
+        elif record.levelno >= logging.ERROR:
+             return f"{Fore.RED}{formatted_message}{Style.RESET_ALL}"
+        elif record.levelno == logging.WARNING:
+             return f"{Fore.MAGENTA}{formatted_message}{Style.RESET_ALL}"
+             
+        return formatted_message
+
+handler = logging.StreamHandler()
+handler.setFormatter(ColoredFormatter('%(levelname)s:%(name)s:%(message)s'))
+logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 logger = logging.getLogger("robot_mcp")
 
 # Create the MCP server
@@ -48,7 +68,7 @@ def get_camera_image() -> str:
     Obtain an image from the robot's camera.
     Returns a base64 encoded JPEG string of the image.
     """
-    logger.info(f"{Fore.MAGENTA}EXECUTING: get_camera_image{Style.RESET_ALL}")
+    logger.info(f"EXECUTING: get_camera_image")
 
     # Initialize camera (0 is usually default webcam)
     cap = cv2.VideoCapture(0)
@@ -98,7 +118,7 @@ def move_camera(direction: str) -> str:
         direction: Description of where to move (e.g. "left", "right", "pan 30 degrees").
     """
     logger.info(
-        f"{Fore.MAGENTA}EXECUTING: move_camera(direction='{direction}'){Style.RESET_ALL}"
+        f"EXECUTING: move_camera(direction='{direction}')"
     )
     print(
         f"\n{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
