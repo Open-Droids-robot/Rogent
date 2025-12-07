@@ -349,7 +349,7 @@ class AgentGraph:
         return "end"
 
     @weave.op()
-    async def process(self, text: str, history: List[Any], image_data: str = None, session_id: str = None) -> (str, List[Any]):
+    async def process(self, text: str, history: List[Any], image_data: str = None, session_id: str = None, trace_context: dict = None) -> (str, List[Any]):
         """
         Process user input with history and return (response_text, updated_history).
         """
@@ -556,8 +556,19 @@ class Agent:
                  await self.speak("I am not fully initialized yet.")
                  return
 
-            # Pass history and session_id to process
-            response_text, updated_history = await self.graph.process(text, self.history, session_id=self.session_id)
+            # Prepare metadata for Weave tracing
+            trace_context = {
+                "model_name": self.graph.model_name,
+                "system_instruction": self.graph.system_instruction
+            }
+
+            # Pass history, session_id, and trace_context to process
+            response_text, updated_history = await self.graph.process(
+                text, 
+                self.history, 
+                session_id=self.session_id,
+                trace_context=trace_context
+            )
             
             # Update history
             self.history = updated_history
