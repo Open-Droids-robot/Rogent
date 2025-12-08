@@ -503,76 +503,24 @@ def plot_bounding_boxes(detections_json: str) -> str:
         logger.error(f"Bounding box plotting failed: {e}")
         return f"Error: {e}"
 
-@mcp.tool()
-def analyze_scene(instruction: str) -> str:
-    """
-    Analyzes the current scene using the robot's camera to perform object detection, 
-    scene understanding, or trajectory planning.
-    
-    Args:
-        instruction: The specific task (e.g. "Find the red cup", "Describe the scene", "Plan a path to the door").
-    """
-    logger.info(f"EXECUTING: analyze_scene(instruction='{instruction}')")
-    
-    # 1. Capture Image (reuse existing tool logic)
-    img_b64 = get_camera_image()
-    if img_b64.startswith("Error"):
-        return img_b64
-        
+# --- HELPER FOR VISION CALLS ---
+def _call_vision_model(prompt: str, instruction: str, image_b64: str) -> str:
+    """Internal helper to call the vision model."""
     try:
-        # 2. Setup Client
         if not GOOGLE_API_KEY:
             return "Error: GOOGLE_API_KEY not found in environment."
             
         client = genai.Client(api_key=GOOGLE_API_KEY)
-        # Use a fast, vision-capable model for the inner loop
         model_name = os.getenv('PERCEPTION_MODEL', 'gemini-2.5-flash')
         
-        # 3. Define the Perception System Prompt
-        perception_prompt = """
-        You are a Scene Understanding AI for a robot.
-        Analyze the provided image based on the User's Instruction.
-        
-        OUTPUT FORMATS:
-        
-        A) FOR OBJECT DETECTION ("Find the...", "Where is...", "Point to..."):
-           Return a JSON list: [{"point": [y, x], "label": "object_name"}]
-           - y, x are normalized coordinates (0-1000).
-           
-        B) FOR BOUNDING BOX DETECTION ("Detect objects with boxes", "Box the...", "Draw boxes"):
-           Return bounding boxes as a JSON array with labels. Never return masks
-           or code fencing. Limit to 25 objects. Include as many objects as you
-           can identify on the table.
-
-           If an object is present multiple times, name them according to their
-           unique characteristic (colors, size, position, unique characteristics, etc..).
-
-           The format should be as follows: [{"box_2d": [ymin, xmin, ymax, xmax],
-           "label": <label for the object>}] normalized to 0-1000. The values in
-           box_2d must only be integers.
-           
-        C) FOR TRAJECTORY PLANNING ("Plan a path...", "Go to..."):
-           Return a JSON list: [{"coordinates": [y, x], "step": "step_number"}]
-           - y, x are normalized coordinates (0-1000).
-           
-        D) FOR DESCRIPTION ("Describe...", "What do you see?"):
-           Return a natural language description.
-           
-        CRITICAL RULES:
-        - If returning JSON, output ONLY the raw JSON string. Do not use Markdown code blocks.
-        - Normalize coordinates: [0,0] is top-left, [1000,1000] is bottom-right.
-        - If the user asks for a path/trajectory, provide at least 3-5 waypoints.
-        """
-        
-        # 4. Call the Model
-        img_bytes = base64.b64decode(img_b64)
+        img_bytes = base64.b64decode(image_b64)
         response = client.models.generate_content(
             model=model_name,
             contents=[
                 types.Content(
                     role="user",
                     parts=[
-                        types.Part(text=perception_prompt),
+                        types.Part(text=prompt),
                         types.Part(text=f"User Instruction: {instruction}"),
                         types.Part(inline_data=types.Blob(mime_type='image/jpeg', data=img_bytes))
                     ]
@@ -581,49 +529,112 @@ def analyze_scene(instruction: str) -> str:
         )
         
         if not response.text:
-            return "Vision model returned no text."
+            return "Error: Vision model returned no text."
             
-        result_text = response.text.strip()
-        
-        # 5. Handle Result & Plotting
-        # Clean up any potential markdown formatting
-        cleaned_text = result_text.replace('```json', '').replace('```', '').strip()
-        
-        is_json = False
-        parsed_data = None
-        try:
-            parsed_data = json.loads(cleaned_text)
-            if isinstance(parsed_data, list) and len(parsed_data) > 0:
-                is_json = True
-        except:
-            pass
-            
-        if is_json and parsed_data:
-            first_item = parsed_data[0]
-            
-            # Case A: Object Detection
-            if "point" in first_item:
-                # We call the plot_detections tool directly
-                plot_msg = plot_detections(cleaned_text)
-                return f"Objects Detected: {cleaned_text}\n{plot_msg}"
-            
-            # Case A.2: Bounding Boxes
-            elif "box_2d" in first_item:
-                plot_msg = plot_bounding_boxes(cleaned_text)
-                return f"Objects Detected (Boxes): {cleaned_text}\n{plot_msg}"
-                
-            # Case B: Trajectory
-            elif "coordinates" in first_item:
-                # We call the plot_trajectory tool directly
-                plot_msg = plot_trajectory(cleaned_text)
-                return f"Trajectory Planned: {cleaned_text}\n{plot_msg}"
-        
-        # Case C: Description or text response
-        return f"Scene Analysis: {result_text}"
-
+        return response.text.strip()
     except Exception as e:
-        logger.error(f"Analyze Scene Error: {e}")
-        return f"Error analyzing scene: {e}"
+        logger.error(f"Vision Call Error: {e}")
+        return f"Error calling vision model: {e}"
+
+@mcp.tool()
+def understand_scene(instruction: str) -> str:
+    """
+    Get a natural language description of the scene.
+    Args:
+        instruction: Specific question (e.g. "Describe the scene", "Is it safe to move?").
+    """
+    logger.info(f"EXECUTING: understand_scene('{instruction}')")
+    
+    img_b64 = get_camera_image()
+    if img_b64.startswith("Error"): return img_b64
+    
+    prompt = """
+    You are a Scene Understanding AI for a robot.
+    Provide a clear, natural language description of the scene based on the user's instruction.
+    Do NOT return JSON. Just text.
+    """
+    return _call_vision_model(prompt, instruction, img_b64)
+
+@mcp.tool()
+def detect_objects(instruction: str) -> str:
+    """
+    Detect objects and return their point locations.
+    Args:
+        instruction: E.g. "Find the cup", "Where is the bottle?".
+    """
+    logger.info(f"EXECUTING: detect_objects('{instruction}')")
+    
+    img_b64 = get_camera_image()
+    if img_b64.startswith("Error"): return img_b64
+    
+    prompt = """
+    You are an Object Detection AI.
+    Return a JSON list of objects: [{"point": [y, x], "label": "object_name"}]
+    - y, x are normalized coordinates (0-1000).
+    - [0,0] is top-left.
+    - Output ONLY raw JSON. No markdown.
+    """
+    
+    result = _call_vision_model(prompt, instruction, img_b64)
+    if result.startswith("Error"): return result
+    
+    cleaned_text = result.replace('```json', '').replace('```', '').strip()
+    plot_msg = plot_detections(cleaned_text)
+    return f"Detections: {cleaned_text}\n{plot_msg}"
+
+@mcp.tool()
+def get_bounded_boxes(instruction: str) -> str:
+    """
+    Detect objects and return/plot bounding boxes.
+    Args:
+        instruction: E.g. "Box all the fruits", "Draw a box around the cup".
+    """
+    logger.info(f"EXECUTING: get_bounded_boxes('{instruction}')")
+    
+    img_b64 = get_camera_image()
+    if img_b64.startswith("Error"): return img_b64
+    
+    prompt = """
+    You are an Object Detection AI using Bounding Boxes.
+    Return a JSON list: [{"box_2d": [ymin, xmin, ymax, xmax], "label": "name"}]
+    - Coordinates normalized to 0-1000.
+    - Output ONLY raw JSON. No markdown.
+    - Limit to 25 objects.
+    """
+    
+    result = _call_vision_model(prompt, instruction, img_b64)
+    if result.startswith("Error"): return result
+    
+    cleaned_text = result.replace('```json', '').replace('```', '').strip()
+    plot_msg = plot_bounding_boxes(cleaned_text)
+    return f"Boxes: {cleaned_text}\n{plot_msg}"
+
+@mcp.tool()
+def get_trajectory(instruction: str) -> str:
+    """
+    Plan a movement trajectory.
+    Args:
+        instruction: E.g. "Plan a path to the door".
+    """
+    logger.info(f"EXECUTING: get_trajectory('{instruction}')")
+    
+    img_b64 = get_camera_image()
+    if img_b64.startswith("Error"): return img_b64
+    
+    prompt = """
+    You are a Trajectory Planning AI.
+    Return a JSON list of waypoints: [{"coordinates": [y, x], "step": "0"}]
+    - Coordinates normalized to 0-1000.
+    - Provide at least 3-5 waypoints.
+    - Output ONLY raw JSON. No markdown.
+    """
+    
+    result = _call_vision_model(prompt, instruction, img_b64)
+    if result.startswith("Error"): return result
+    
+    cleaned_text = result.replace('```json', '').replace('```', '').strip()
+    plot_msg = plot_trajectory(cleaned_text)
+    return f"Trajectory: {cleaned_text}\n{plot_msg}"
 
 # Load tools from the tools package
 load_tools(mcp)

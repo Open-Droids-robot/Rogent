@@ -290,8 +290,17 @@ class AgentGraph:
                     # --------------------------------
 
                     # --- Trace Image for Plotting Tools ---
-                    # Update this line to include 'analyze_scene'
-                    if tool_name in ["plot_detections", "plot_bounding_boxes", "plot_trajectory", "analyze_scene"] and "saved to" in result_text:
+                    # Update this line to include new tools: detect_objects, get_bounded_boxes, get_trajectory
+                    plotting_tools = [
+                        "plot_detections", 
+                        "plot_bounding_boxes", 
+                        "plot_trajectory", 
+                        "detect_objects", 
+                        "get_bounded_boxes", 
+                        "get_trajectory"
+                    ]
+                                      
+                    if tool_name in plotting_tools and "saved to" in result_text:
                         try:
                             # Extract filename from "Visualization saved to outputs/filename.jpg"
                             # We look for the last word or parse the path
