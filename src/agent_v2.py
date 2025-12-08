@@ -77,6 +77,7 @@ import select
 # --- LangGraph State ---
 class AgentState(TypedDict):
     contents: Annotated[List[Any], operator.add] # Accumulate history (List[types.Content])
+    session_id: str # Carry session ID across graph
 
 # --- Helper: Schema Conversion ---
 def mcp_schema_to_gemini_schema(schema: dict) -> types.Schema:
@@ -204,6 +205,7 @@ class AgentGraph:
     @weave.op()
     async def tool_node(self, state: AgentState):
         contents = state['contents']
+        session_id = state.get('session_id')
         last_content = contents[-1]
         
         # Extract parts from the last content (safely handling dict vs object)
@@ -251,6 +253,15 @@ class AgentGraph:
                             args['query'] = " ".join(q)
                         else:
                             args['query'] = str(q)
+
+                # Inject session_id if available
+                if session_id:
+                     
+                     # Check if it's one of OUR tools that accepts session_id
+                     if tool_name in ["get_camera_image", "plot_detections", "plot_bounding_boxes", 
+                                      "plot_trajectory", "detect_objects", "get_bounded_boxes", 
+                                      "get_trajectory", "understand_scene"]:
+                         args['session_id'] = session_id
                 
                 logger.info(f"Executing Tool: {tool_name} with {args}")
                 
@@ -402,7 +413,8 @@ class AgentGraph:
         new_user_content = types.Content(role="user", parts=parts)
         
         current_contents = history + [new_user_content]
-        inputs = {"contents": current_contents}
+        # Pass session_id into the state
+        inputs = {"contents": current_contents, "session_id": session_id}
         
         final_state = await self.graph.ainvoke(inputs)
         

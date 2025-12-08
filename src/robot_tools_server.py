@@ -26,6 +26,21 @@ except ImportError:
 # Configure logging
 init(autoreset=True)
 
+def get_output_path(filename: str, session_id: str = None) -> str:
+    """Helper to determine file path based on session_id."""
+    base_folder = "outputs"
+    if session_id:
+        # Sanitize session_id just in case
+        safe_id = "".join([c for c in session_id if c.isalnum() or c in ('-', '_')])
+        target_folder = os.path.join(base_folder, safe_id)
+    else:
+        # Default to date folder if no session provided
+        date_str = time.strftime("%Y-%m-%d")
+        target_folder = os.path.join(base_folder, date_str)
+        
+    os.makedirs(target_folder, exist_ok=True)
+    return os.path.join(target_folder, filename)
+
 class ColoredFormatter(logging.Formatter):
     def format(self, record):
         # Format the message using the standard formatter first
@@ -69,7 +84,7 @@ def load_tools(mcp_instance):
             logger.error(f"Failed to load module {name}: {e}")
 
 @mcp.tool()
-def get_camera_image() -> str:
+def get_camera_image(session_id: str = None) -> str:
     """
     Obtain an image from the robot's camera.
     Returns a base64 encoded JPEG string of the image.
@@ -100,7 +115,7 @@ def get_camera_image() -> str:
 
         # Save to outputs folder with timestamp
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"outputs/captured_image_{timestamp}.jpg"
+        filename = get_output_path(f"captured_image_{timestamp}.jpg", session_id)
         img.save(filename)
         logger.info(f"Image saved to {filename}")
 
@@ -231,7 +246,7 @@ def search_web(query: str) -> str:
         return f"Search failed: {e}"
 
 @mcp.tool()
-def plot_detections(detections_json: str) -> str:
+def plot_detections(detections_json: str, session_id: str = None) -> str:
     """
     Visualize detected objects by drawing points/labels on the last captured image.
     
@@ -244,7 +259,16 @@ def plot_detections(detections_json: str) -> str:
     
     # 1. Find the most recent image in outputs/
     try:
-        list_of_files = glob.glob('outputs/captured_image_*.jpg') 
+        # Search in the session folder if provided, else recursive or date-based?
+        # For simplicity, we search recursively in outputs/ if session_id is None,
+        # or specific folder if provided.
+        if session_id:
+             base_search = os.path.join("outputs", session_id)
+             list_of_files = glob.glob(os.path.join(base_search, 'captured_image_*.jpg'))
+        else:
+             # Look in all subdirs or root (glob recursive)
+             list_of_files = glob.glob('outputs/**/captured_image_*.jpg', recursive=True)
+             
         if not list_of_files:
             return "Error: No recent image found to plot on."
         
@@ -309,7 +333,7 @@ def plot_detections(detections_json: str) -> str:
 
         # 5. Save Output
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        outfile = f"outputs/detection_vis_{timestamp}.jpg"
+        outfile = get_output_path(f"detection_vis_{timestamp}.jpg", session_id)
         img.save(outfile)
         logger.info(f"Saved visualization to {outfile}")
         
@@ -320,7 +344,7 @@ def plot_detections(detections_json: str) -> str:
         return f"Error: {e}"
 
 @mcp.tool()
-def plot_trajectory(trajectory_json: str) -> str:
+def plot_trajectory(trajectory_json: str, session_id: str = None) -> str:
     """
     Visualize a movement trajectory by drawing lines/points on the last captured image.
     
@@ -332,12 +356,14 @@ def plot_trajectory(trajectory_json: str) -> str:
     logger.info(f"EXECUTING: plot_trajectory")
     
     try:
-        # 1. Find the most recent image (or the one we just plotted objects on)
-        # We prefer 'detection_vis_' if it exists (so we layer trajectory ON TOP of detections)
-        # Otherwise fallback to raw 'captured_image_'
-        
-        vis_files = glob.glob('outputs/detection_vis_*.jpg')
-        raw_files = glob.glob('outputs/captured_image_*.jpg')
+        # 1. Find the most recent image
+        if session_id:
+             base_search = os.path.join("outputs", session_id)
+             vis_files = glob.glob(os.path.join(base_search, 'detection_vis_*.jpg'))
+             raw_files = glob.glob(os.path.join(base_search, 'captured_image_*.jpg'))
+        else:
+             vis_files = glob.glob('outputs/**/detection_vis_*.jpg', recursive=True)
+             raw_files = glob.glob('outputs/**/captured_image_*.jpg', recursive=True)
         
         target_file = None
         
@@ -389,10 +415,8 @@ def plot_trajectory(trajectory_json: str) -> str:
             draw.ellipse((x-r, y-r, x+r, y+r), fill=trajectory_color, outline=outline_color, width=2)
 
         # 5. Save Output
-        # We overwrite the target file or create a new "final" one? 
-        # Creating a new one preserves history.
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        outfile = f"outputs/trajectory_vis_{timestamp}.jpg"
+        outfile = get_output_path(f"trajectory_vis_{timestamp}.jpg", session_id)
         img.save(outfile)
         logger.info(f"Saved trajectory visualization to {outfile}")
         
@@ -403,7 +427,7 @@ def plot_trajectory(trajectory_json: str) -> str:
         return f"Error: {e}"
 
 @mcp.tool()
-def plot_bounding_boxes(detections_json: str) -> str:
+def plot_bounding_boxes(detections_json: str, session_id: str = None) -> str:
     """
     Visualize detected objects by drawing bounding boxes/labels on the last captured image.
     
@@ -416,7 +440,12 @@ def plot_bounding_boxes(detections_json: str) -> str:
     
     try:
         # 1. Find the most recent image in outputs/
-        list_of_files = glob.glob('outputs/captured_image_*.jpg') 
+        if session_id:
+             base_search = os.path.join("outputs", session_id)
+             list_of_files = glob.glob(os.path.join(base_search, 'captured_image_*.jpg'))
+        else:
+             list_of_files = glob.glob('outputs/**/captured_image_*.jpg', recursive=True)
+
         if not list_of_files:
             return "Error: No recent image found to plot on."
         
@@ -493,7 +522,7 @@ def plot_bounding_boxes(detections_json: str) -> str:
 
         # 5. Save Output
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        outfile = f"outputs/bounded_boxes_{timestamp}.jpg"
+        outfile = get_output_path(f"bounded_boxes_{timestamp}.jpg", session_id)
         img.save(outfile)
         logger.info(f"Saved visualization to {outfile}")
         
@@ -537,7 +566,7 @@ def _call_vision_model(prompt: str, instruction: str, image_b64: str) -> str:
         return f"Error calling vision model: {e}"
 
 @mcp.tool()
-def understand_scene(instruction: str) -> str:
+def understand_scene(instruction: str, session_id: str = None) -> str:
     """
     Get a natural language description of the scene.
     Args:
@@ -545,7 +574,7 @@ def understand_scene(instruction: str) -> str:
     """
     logger.info(f"EXECUTING: understand_scene('{instruction}')")
     
-    img_b64 = get_camera_image()
+    img_b64 = get_camera_image(session_id)
     if img_b64.startswith("Error"): return img_b64
     
     prompt = """
@@ -556,7 +585,7 @@ def understand_scene(instruction: str) -> str:
     return _call_vision_model(prompt, instruction, img_b64)
 
 @mcp.tool()
-def detect_objects(instruction: str) -> str:
+def detect_objects(instruction: str, session_id: str = None) -> str:
     """
     Detect objects and return their point locations.
     Args:
@@ -564,7 +593,7 @@ def detect_objects(instruction: str) -> str:
     """
     logger.info(f"EXECUTING: detect_objects('{instruction}')")
     
-    img_b64 = get_camera_image()
+    img_b64 = get_camera_image(session_id)
     if img_b64.startswith("Error"): return img_b64
     
     prompt = """
@@ -579,11 +608,11 @@ def detect_objects(instruction: str) -> str:
     if result.startswith("Error"): return result
     
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
-    plot_msg = plot_detections(cleaned_text)
+    plot_msg = plot_detections(cleaned_text, session_id)
     return f"Detections: {cleaned_text}\n{plot_msg}"
 
 @mcp.tool()
-def get_bounded_boxes(instruction: str) -> str:
+def get_bounded_boxes(instruction: str, session_id: str = None) -> str:
     """
     Detect objects and return/plot bounding boxes.
     Args:
@@ -591,7 +620,7 @@ def get_bounded_boxes(instruction: str) -> str:
     """
     logger.info(f"EXECUTING: get_bounded_boxes('{instruction}')")
     
-    img_b64 = get_camera_image()
+    img_b64 = get_camera_image(session_id)
     if img_b64.startswith("Error"): return img_b64
     
     prompt = """
@@ -606,11 +635,11 @@ def get_bounded_boxes(instruction: str) -> str:
     if result.startswith("Error"): return result
     
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
-    plot_msg = plot_bounding_boxes(cleaned_text)
+    plot_msg = plot_bounding_boxes(cleaned_text, session_id)
     return f"Boxes: {cleaned_text}\n{plot_msg}"
 
 @mcp.tool()
-def get_trajectory(instruction: str) -> str:
+def get_trajectory(instruction: str, session_id: str = None) -> str:
     """
     Plan a movement trajectory.
     Args:
@@ -618,7 +647,7 @@ def get_trajectory(instruction: str) -> str:
     """
     logger.info(f"EXECUTING: get_trajectory('{instruction}')")
     
-    img_b64 = get_camera_image()
+    img_b64 = get_camera_image(session_id)
     if img_b64.startswith("Error"): return img_b64
     
     prompt = """
@@ -633,7 +662,7 @@ def get_trajectory(instruction: str) -> str:
     if result.startswith("Error"): return result
     
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
-    plot_msg = plot_trajectory(cleaned_text)
+    plot_msg = plot_trajectory(cleaned_text, session_id)
     return f"Trajectory: {cleaned_text}\n{plot_msg}"
 
 # Load tools from the tools package
