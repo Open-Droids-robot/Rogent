@@ -152,12 +152,7 @@ class AgentGraph:
                 logger.warning("prompts/persona.txt not found, using default.")
                 system_parts.append("You are a helpful robot assistant named Orin.")
             
-            # Load perception.txt
-            if os.path.exists(perception_path):
-                with open(perception_path, "r") as f:
-                    system_parts.append(f.read())
-            else:
-                logger.warning("prompts/perception.txt not found.")
+            # perception.txt is now handled via the analyze_scene tool
             
             self.system_instruction = "\n\n".join(system_parts)
         except Exception as e:
@@ -295,7 +290,8 @@ class AgentGraph:
                     # --------------------------------
 
                     # --- Trace Image for Plotting Tools ---
-                    if tool_name in ["plot_detections", "plot_trajectory"] and "saved to" in result_text:
+                    # Update this line to include 'analyze_scene'
+                    if tool_name in ["plot_detections", "plot_bounding_boxes", "plot_trajectory", "analyze_scene"] and "saved to" in result_text:
                         try:
                             # Extract filename from "Visualization saved to outputs/filename.jpg"
                             # We look for the last word or parse the path

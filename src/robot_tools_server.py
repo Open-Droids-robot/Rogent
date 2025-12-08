@@ -15,6 +15,8 @@ import importlib
 import tools
 from dotenv import load_dotenv
 from colorama import Fore, Style, init
+from google import genai
+from google.genai import types
 
 try:
     from duckduckgo_search import DDGS
@@ -44,6 +46,10 @@ handler = logging.StreamHandler()
 handler.setFormatter(ColoredFormatter('%(levelname)s:%(name)s:%(message)s'))
 logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 logger = logging.getLogger("robot_mcp")
+
+# Load environment variables
+load_dotenv()
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 # Create the MCP server
 mcp = FastMCP("RobotTools")
@@ -395,6 +401,229 @@ def plot_trajectory(trajectory_json: str) -> str:
     except Exception as e:
         logger.error(f"Trajectory plotting failed: {e}")
         return f"Error: {e}"
+
+@mcp.tool()
+def plot_bounding_boxes(detections_json: str) -> str:
+    """
+    Visualize detected objects by drawing bounding boxes/labels on the last captured image.
+    
+    Args:
+        detections_json: A JSON string list of objects.
+                         Example: '[{"box_2d": [ymin, xmin, ymax, xmax], "label": "cup"}]'
+                         Coordinates must be normalized to 0-1000.
+    """
+    logger.info(f"EXECUTING: plot_bounding_boxes")
+    
+    try:
+        # 1. Find the most recent image in outputs/
+        list_of_files = glob.glob('outputs/captured_image_*.jpg') 
+        if not list_of_files:
+            return "Error: No recent image found to plot on."
+        
+        # Get the latest file created
+        latest_file = max(list_of_files, key=os.path.getctime)
+        logger.info(f"Plotting on: {latest_file}")
+        
+        # 2. Load Image with Pillow
+        img = Image.open(latest_file)
+        width, height = img.size
+        draw = ImageDraw.Draw(img)
+        
+        # Setup Font
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+        except IOError:
+            try:
+                font = ImageFont.truetype("arial.ttf", 24)
+            except IOError:
+                font = ImageFont.load_default()
+
+        # 3. Parse JSON
+        detections = json.loads(detections_json)
+        
+        # Define a list of nice colors to cycle through
+        colors = [
+            (255, 0, 0),    # Red
+            (0, 255, 0),    # Green
+            (0, 0, 255),    # Blue
+            (255, 255, 0),  # Yellow
+            (0, 255, 255),  # Cyan
+            (255, 0, 255),  # Magenta
+            (255, 128, 0),  # Orange
+            (128, 0, 128),  # Purple
+        ]
+
+        # 4. Plot Logic
+        for i, item in enumerate(detections):
+            if 'box_2d' not in item: continue
+            
+            # [ymin, xmin, ymax, xmax] normalized
+            ymin_norm, xmin_norm, ymax_norm, xmax_norm = item['box_2d']
+            label = item.get('label', 'object')
+            
+            # Pick a color
+            color = colors[i % len(colors)]
+            
+            # Convert to pixels
+            ymin = int((ymin_norm / 1000) * height)
+            xmin = int((xmin_norm / 1000) * width)
+            ymax = int((ymax_norm / 1000) * height)
+            xmax = int((xmax_norm / 1000) * width)
+            
+            # Draw Rectangle
+            draw.rectangle([xmin, ymin, xmax, ymax], outline=color, width=4)
+            
+            # Draw Label
+            bbox = draw.textbbox((0, 0), label, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            # Position text above the box if possible, else inside top
+            text_x = xmin
+            text_y = ymin - text_height - 6
+            if text_y < 0:
+                text_y = ymin + 4
+            
+            pad = 4
+            draw.rectangle(
+                (text_x - pad, text_y - pad, text_x + text_width + pad, text_y + text_height + pad),
+                fill=color
+            )
+            draw.text((text_x, text_y), label, fill="white", font=font)
+
+        # 5. Save Output
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        outfile = f"outputs/bounded_boxes_{timestamp}.jpg"
+        img.save(outfile)
+        logger.info(f"Saved visualization to {outfile}")
+        
+        return f"Visualization saved to {outfile}"
+
+    except Exception as e:
+        logger.error(f"Bounding box plotting failed: {e}")
+        return f"Error: {e}"
+
+@mcp.tool()
+def analyze_scene(instruction: str) -> str:
+    """
+    Analyzes the current scene using the robot's camera to perform object detection, 
+    scene understanding, or trajectory planning.
+    
+    Args:
+        instruction: The specific task (e.g. "Find the red cup", "Describe the scene", "Plan a path to the door").
+    """
+    logger.info(f"EXECUTING: analyze_scene(instruction='{instruction}')")
+    
+    # 1. Capture Image (reuse existing tool logic)
+    img_b64 = get_camera_image()
+    if img_b64.startswith("Error"):
+        return img_b64
+        
+    try:
+        # 2. Setup Client
+        if not GOOGLE_API_KEY:
+            return "Error: GOOGLE_API_KEY not found in environment."
+            
+        client = genai.Client(api_key=GOOGLE_API_KEY)
+        # Use a fast, vision-capable model for the inner loop
+        model_name = os.getenv('PERCEPTION_MODEL', 'gemini-2.5-flash')
+        
+        # 3. Define the Perception System Prompt
+        perception_prompt = """
+        You are a Scene Understanding AI for a robot.
+        Analyze the provided image based on the User's Instruction.
+        
+        OUTPUT FORMATS:
+        
+        A) FOR OBJECT DETECTION ("Find the...", "Where is...", "Point to..."):
+           Return a JSON list: [{"point": [y, x], "label": "object_name"}]
+           - y, x are normalized coordinates (0-1000).
+           
+        B) FOR BOUNDING BOX DETECTION ("Detect objects with boxes", "Box the...", "Draw boxes"):
+           Return bounding boxes as a JSON array with labels. Never return masks
+           or code fencing. Limit to 25 objects. Include as many objects as you
+           can identify on the table.
+
+           If an object is present multiple times, name them according to their
+           unique characteristic (colors, size, position, unique characteristics, etc..).
+
+           The format should be as follows: [{"box_2d": [ymin, xmin, ymax, xmax],
+           "label": <label for the object>}] normalized to 0-1000. The values in
+           box_2d must only be integers.
+           
+        C) FOR TRAJECTORY PLANNING ("Plan a path...", "Go to..."):
+           Return a JSON list: [{"coordinates": [y, x], "step": "step_number"}]
+           - y, x are normalized coordinates (0-1000).
+           
+        D) FOR DESCRIPTION ("Describe...", "What do you see?"):
+           Return a natural language description.
+           
+        CRITICAL RULES:
+        - If returning JSON, output ONLY the raw JSON string. Do not use Markdown code blocks.
+        - Normalize coordinates: [0,0] is top-left, [1000,1000] is bottom-right.
+        - If the user asks for a path/trajectory, provide at least 3-5 waypoints.
+        """
+        
+        # 4. Call the Model
+        img_bytes = base64.b64decode(img_b64)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[
+                types.Content(
+                    role="user",
+                    parts=[
+                        types.Part(text=perception_prompt),
+                        types.Part(text=f"User Instruction: {instruction}"),
+                        types.Part(inline_data=types.Blob(mime_type='image/jpeg', data=img_bytes))
+                    ]
+                )
+            ]
+        )
+        
+        if not response.text:
+            return "Vision model returned no text."
+            
+        result_text = response.text.strip()
+        
+        # 5. Handle Result & Plotting
+        # Clean up any potential markdown formatting
+        cleaned_text = result_text.replace('```json', '').replace('```', '').strip()
+        
+        is_json = False
+        parsed_data = None
+        try:
+            parsed_data = json.loads(cleaned_text)
+            if isinstance(parsed_data, list) and len(parsed_data) > 0:
+                is_json = True
+        except:
+            pass
+            
+        if is_json and parsed_data:
+            first_item = parsed_data[0]
+            
+            # Case A: Object Detection
+            if "point" in first_item:
+                # We call the plot_detections tool directly
+                plot_msg = plot_detections(cleaned_text)
+                return f"Objects Detected: {cleaned_text}\n{plot_msg}"
+            
+            # Case A.2: Bounding Boxes
+            elif "box_2d" in first_item:
+                plot_msg = plot_bounding_boxes(cleaned_text)
+                return f"Objects Detected (Boxes): {cleaned_text}\n{plot_msg}"
+                
+            # Case B: Trajectory
+            elif "coordinates" in first_item:
+                # We call the plot_trajectory tool directly
+                plot_msg = plot_trajectory(cleaned_text)
+                return f"Trajectory Planned: {cleaned_text}\n{plot_msg}"
+        
+        # Case C: Description or text response
+        return f"Scene Analysis: {result_text}"
+
+    except Exception as e:
+        logger.error(f"Analyze Scene Error: {e}")
+        return f"Error analyzing scene: {e}"
 
 # Load tools from the tools package
 load_tools(mcp)
