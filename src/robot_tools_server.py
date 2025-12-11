@@ -538,6 +538,55 @@ def plot_bounding_boxes(detections_json: str, session_id: str = None) -> str:
         logger.error(f"Bounding box plotting failed: {e}")
         return f"Error: {e}"
 
+@mcp.tool()
+def denormalize_coords(x_norm: float, y_norm: float, session_id: str = None) -> str:
+    """
+    Convert normalized coordinates (0-1000) back to pixel or raw camera coordinates.
+    
+    Args:
+        x_norm: Normalized x coordinate (0-1000).
+        y_norm: Normalized y coordinate (0-1000).
+    """
+    logger.info(f"EXECUTING: denormalize_coords(x={x_norm}, y={y_norm})")
+    
+    # 1. Get image dimensions from latest image
+    try:
+        if session_id:
+             base_search = os.path.join("outputs", session_id)
+             list_of_files = glob.glob(os.path.join(base_search, 'captured_image_*.jpg'))
+        else:
+             list_of_files = glob.glob('outputs/**/captured_image_*.jpg', recursive=True)
+             
+        if not list_of_files:
+            return "Error: No recent image found to determine resolution."
+            
+        latest_file = max(list_of_files, key=os.path.getctime)
+        img = Image.open(latest_file)
+        width, height = img.size
+    except Exception as e:
+        logger.error(f"Failed to load latest image dimensions: {e}")
+        return f"Error: {e}"
+
+    # 2. Denormalize
+    try:
+        x_val = float(x_norm)
+        y_val = float(y_norm)
+    except ValueError:
+        return "Error: Coordinates must be numbers."
+
+    x_pixel = int((x_val / 1000) * width)
+    y_pixel = int((y_val / 1000) * height)
+    
+    result = {
+        "pixel_coords": [x_pixel, y_pixel],
+        "image_dims": [width, height],
+        "normalized_input": [x_val, y_val]
+    }
+
+    logger.info(f"Denormalized coordinates: {result}")
+
+    return json.dumps(result)
+
 # --- HELPER FOR VISION CALLS ---
 def _call_vision_model(prompt: str, instruction: str, image_b64: str, json_mode: bool = False) -> str:
     """Internal helper to call the vision model."""
