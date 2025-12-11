@@ -539,17 +539,25 @@ def plot_bounding_boxes(detections_json: str, session_id: str = None) -> str:
         return f"Error: {e}"
 
 # --- HELPER FOR VISION CALLS ---
-def _call_vision_model(prompt: str, instruction: str, image_b64: str) -> str:
+def _call_vision_model(prompt: str, instruction: str, image_b64: str, json_mode: bool = False) -> str:
     """Internal helper to call the vision model."""
     try:
         if not GOOGLE_API_KEY:
             return "Error: GOOGLE_API_KEY not found in environment."
             
         client = genai.Client(api_key=GOOGLE_API_KEY)
-        model_name = os.getenv('PERCEPTION_MODEL', 'gemini-2.5-flash')
-        logger.info(f"Using vision model: {model_name}")
+        # Default to the same model as the agent or a known capable vision model
+        model_name = os.getenv('PERCEPTION_MODEL', 'gemini-2.0-flash-exp')
+        logger.info(f"Using vision model: {model_name} (JSON mode: {json_mode})")
         
         img_bytes = base64.b64decode(image_b64)
+        
+        config = None
+        if json_mode:
+            config = types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+
         response = client.models.generate_content(
             model=model_name,
             contents=[
@@ -561,7 +569,8 @@ def _call_vision_model(prompt: str, instruction: str, image_b64: str) -> str:
                         types.Part(inline_data=types.Blob(mime_type='image/jpeg', data=img_bytes))
                     ]
                 )
-            ]
+            ],
+            config=config
         )
         
         if not response.text:
@@ -611,7 +620,7 @@ def detect_objects(instruction: str, session_id: str = None) -> str:
     - Output ONLY raw JSON. No markdown.
     """
     
-    result = _call_vision_model(prompt, instruction, img_b64)
+    result = _call_vision_model(prompt, instruction, img_b64, json_mode=True)
     if result.startswith("Error"): return result
     
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
@@ -638,7 +647,7 @@ def get_bounded_boxes(instruction: str, session_id: str = None) -> str:
     - Limit to 25 objects.
     """
     
-    result = _call_vision_model(prompt, instruction, img_b64)
+    result = _call_vision_model(prompt, instruction, img_b64, json_mode=True)
     if result.startswith("Error"): return result
     
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
@@ -665,7 +674,7 @@ def get_trajectory(instruction: str, session_id: str = None) -> str:
     - Output ONLY raw JSON. No markdown.
     """
     
-    result = _call_vision_model(prompt, instruction, img_b64)
+    result = _call_vision_model(prompt, instruction, img_b64, json_mode=True)
     if result.startswith("Error"): return result
     
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
