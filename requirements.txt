@@ -7,6 +7,7 @@ anyio==4.12.0
 async-timeout==4.0.3
 attrs==25.4.0
 av==16.0.1
+babel==2.17.0
 backoff==2.2.1
 beautifulsoup4==4.14.3
 cachetools==6.2.2
@@ -18,13 +19,17 @@ cint==1.0.0
 click==8.1.8
 colorama==0.4.6
 coloredlogs==15.0.1
+colorlog==6.10.1
 cryptography==46.0.3
+csvw==3.7.0
 ctranslate2==4.6.2
 dataclasses-json==0.6.7
 diskcache==5.6.3
 distro==1.9.0
+dlinfo==2.0.0
 duckduckgo_search==8.1.1
 edge-tts==7.2.3
+espeakng-loader==0.2.4
 exceptiongroup==1.3.1
 faster-whisper==1.2.1
 fickling==0.1.5
@@ -38,7 +43,7 @@ google-ai-generativelanguage==0.4.0
 google-api-core==2.28.1
 google-auth==2.43.0
 google-genai==1.53.0
-google-generativeai==0.8.5
+google-generativeai==0.3.2
 googleapis-common-protos==1.72.0
 googlesearch-python==1.3.0
 gql==4.0.0
@@ -56,24 +61,28 @@ huggingface_hub==1.2.1
 humanfriendly==10.0
 idna==3.11
 intervaltree==3.1.0
+isodate==0.7.2
 Jinja2==3.1.6
 jiter==0.12.0
+joblib==1.5.2
 jsonpatch==1.33
 jsonpointer==3.0.0
 jsonschema==4.25.1
 jsonschema-specifications==2025.9.1
 kaitaistruct==0.11
+kokoro-onnx==0.4.9
 langchain==1.1.2
 langchain-classic==1.0.0
 langchain-community==0.4.1
-langchain-core==1.1.3
-langchain-google-genai==4.0.0
+langchain-core==1.1.1
+langchain-google-genai==0.0.1
 langchain-text-splitters==1.0.0
 langgraph==1.0.4
 langgraph-checkpoint==3.0.1
 langgraph-prebuilt==1.0.5
 langgraph-sdk==0.2.12
 langsmith==0.4.55
+language-tags==1.2.0
 lxml==6.0.2
 MarkupSafe==3.0.3
 marshmallow==3.26.1
@@ -90,6 +99,7 @@ orjson==3.11.4
 ormsgpack==1.12.0
 packaging==25.0
 pdfminer.six==20250506
+phonemizer-fork==3.3.2
 pillow==12.0.0
 platformdirs==4.5.1
 polyfile-weave==0.5.7
@@ -104,181 +114,189 @@ pydantic==2.12.5
 pydantic-settings==2.12.0
 pydantic_core==2.41.5
 PyJWT==2.10.1
-# pyobjc==12.1
-# pyobjc-core==12.1
-# pyobjc-framework-Accessibility==12.1
-# pyobjc-framework-Accounts==12.1
-# pyobjc-framework-AddressBook==12.1
-# pyobjc-framework-AdServices==12.1
-# pyobjc-framework-AdSupport==12.1
-# pyobjc-framework-AppleScriptKit==12.1
-# pyobjc-framework-AppleScriptObjC==12.1
-# pyobjc-framework-ApplicationServices==12.1
-# pyobjc-framework-AppTrackingTransparency==12.1
-# pyobjc-framework-AudioVideoBridging==12.1
-# pyobjc-framework-AuthenticationServices==12.1
-# pyobjc-framework-AutomaticAssessmentConfiguration==12.1
-# pyobjc-framework-Automator==12.1
-# pyobjc-framework-AVFoundation==12.1
-# pyobjc-framework-AVKit==12.1
-# pyobjc-framework-AVRouting==12.1
-# pyobjc-framework-BackgroundAssets==12.1
-# pyobjc-framework-BrowserEngineKit==12.1
-# pyobjc-framework-BusinessChat==12.1
-# pyobjc-framework-CalendarStore==12.1
-# pyobjc-framework-CallKit==12.1
-# pyobjc-framework-Carbon==12.1
-# pyobjc-framework-CFNetwork==12.1
-# pyobjc-framework-Cinematic==12.1
-# pyobjc-framework-ClassKit==12.1
-# pyobjc-framework-CloudKit==12.1
-# pyobjc-framework-Cocoa==12.1
-# pyobjc-framework-Collaboration==12.1
-# pyobjc-framework-ColorSync==12.1
-# pyobjc-framework-Contacts==12.1
-# pyobjc-framework-ContactsUI==12.1
-# pyobjc-framework-CoreAudio==12.1
-# pyobjc-framework-CoreAudioKit==12.1
-# pyobjc-framework-CoreBluetooth==12.1
-# pyobjc-framework-CoreData==12.1
-# pyobjc-framework-CoreHaptics==12.1
-# pyobjc-framework-CoreLocation==12.1
-# pyobjc-framework-CoreMedia==12.1
-# pyobjc-framework-CoreMediaIO==12.1
-# pyobjc-framework-CoreMIDI==12.1
-# pyobjc-framework-CoreML==12.1
-# pyobjc-framework-CoreMotion==12.1
-# pyobjc-framework-CoreServices==12.1
-# pyobjc-framework-CoreSpotlight==12.1
-# pyobjc-framework-CoreText==12.1
-# pyobjc-framework-CoreWLAN==12.1
-# pyobjc-framework-CryptoTokenKit==12.1
-# pyobjc-framework-DataDetection==12.1
-# pyobjc-framework-DeviceCheck==12.1
-# pyobjc-framework-DeviceDiscoveryExtension==12.1
-# pyobjc-framework-DictionaryServices==12.1
-# pyobjc-framework-DiscRecording==12.1
-# pyobjc-framework-DiscRecordingUI==12.1
-# pyobjc-framework-DiskArbitration==12.1
-# pyobjc-framework-DVDPlayback==12.1
-# pyobjc-framework-EventKit==12.1
-# pyobjc-framework-ExceptionHandling==12.1
-# pyobjc-framework-ExecutionPolicy==12.1
-# pyobjc-framework-ExtensionKit==12.1
-# pyobjc-framework-ExternalAccessory==12.1
-# pyobjc-framework-FileProvider==12.1
-# pyobjc-framework-FileProviderUI==12.1
-# pyobjc-framework-FinderSync==12.1
-# pyobjc-framework-FSEvents==12.1
-# pyobjc-framework-FSKit==12.1
-# pyobjc-framework-GameCenter==12.1
-# pyobjc-framework-GameController==12.1
-# pyobjc-framework-GameKit==12.1
-# pyobjc-framework-GameplayKit==12.1
-# pyobjc-framework-HealthKit==12.1
-# pyobjc-framework-ImageCaptureCore==12.1
-# pyobjc-framework-InputMethodKit==12.1
-# pyobjc-framework-InstallerPlugins==12.1
-# pyobjc-framework-InstantMessage==12.1
-# pyobjc-framework-Intents==12.1
-# pyobjc-framework-IntentsUI==12.1
-# pyobjc-framework-IOBluetooth==12.1
-# pyobjc-framework-IOBluetoothUI==12.1
-# pyobjc-framework-IOSurface==12.1
-# pyobjc-framework-iTunesLibrary==12.1
-# pyobjc-framework-KernelManagement==12.1
-# pyobjc-framework-LatentSemanticMapping==12.1
-# pyobjc-framework-LaunchServices==12.1
-# pyobjc-framework-libdispatch==12.1
-# pyobjc-framework-libxpc==12.1
-# pyobjc-framework-LinkPresentation==12.1
-# pyobjc-framework-LocalAuthentication==12.1
-# pyobjc-framework-LocalAuthenticationEmbeddedUI==12.1
-# pyobjc-framework-MailKit==12.1
-# pyobjc-framework-MapKit==12.1
-# pyobjc-framework-MediaAccessibility==12.1
-# pyobjc-framework-MediaExtension==12.1
-# pyobjc-framework-MediaLibrary==12.1
-# pyobjc-framework-MediaPlayer==12.1
-# pyobjc-framework-MediaToolbox==12.1
-# pyobjc-framework-Metal==12.1
-# pyobjc-framework-MetalFX==12.1
-# pyobjc-framework-MetalKit==12.1
-# pyobjc-framework-MetalPerformanceShaders==12.1
-# pyobjc-framework-MetalPerformanceShadersGraph==12.1
-# pyobjc-framework-MetricKit==12.1
-# pyobjc-framework-MLCompute==12.1
-# pyobjc-framework-ModelIO==12.1
-# pyobjc-framework-MultipeerConnectivity==12.1
-# pyobjc-framework-NaturalLanguage==12.1
-# pyobjc-framework-NetFS==12.1
-# pyobjc-framework-Network==12.1
-# pyobjc-framework-NetworkExtension==12.1
-# pyobjc-framework-NotificationCenter==12.1
-# pyobjc-framework-OpenDirectory==12.1
-# pyobjc-framework-OSAKit==12.1
-# pyobjc-framework-OSLog==12.1
-# pyobjc-framework-PassKit==12.1
-# pyobjc-framework-PencilKit==12.1
-# pyobjc-framework-PHASE==12.1
-# pyobjc-framework-Photos==12.1
-# pyobjc-framework-PhotosUI==12.1
-# pyobjc-framework-PreferencePanes==12.1
-# pyobjc-framework-PushKit==12.1
-# pyobjc-framework-Quartz==12.1
-# pyobjc-framework-QuickLookThumbnailing==12.1
-# pyobjc-framework-ReplayKit==12.1
-# pyobjc-framework-SafariServices==12.1
-# pyobjc-framework-SafetyKit==12.1
-# pyobjc-framework-SceneKit==12.1
-# pyobjc-framework-ScreenCaptureKit==12.1
-# pyobjc-framework-ScreenSaver==12.1
-# pyobjc-framework-ScreenTime==12.1
-# pyobjc-framework-ScriptingBridge==12.1
-# pyobjc-framework-SearchKit==12.1
-# pyobjc-framework-Security==12.1
-# pyobjc-framework-SecurityFoundation==12.1
-# pyobjc-framework-SecurityInterface==12.1
-# pyobjc-framework-SecurityUI==12.1
-# pyobjc-framework-SensitiveContentAnalysis==12.1
-# pyobjc-framework-ServiceManagement==12.1
-# pyobjc-framework-SharedWithYou==12.1
-# pyobjc-framework-SharedWithYouCore==12.1
-# pyobjc-framework-ShazamKit==12.1
-# pyobjc-framework-Social==12.1
-# pyobjc-framework-SoundAnalysis==12.1
-# pyobjc-framework-Speech==12.1
-# pyobjc-framework-SpriteKit==12.1
-# pyobjc-framework-StoreKit==12.1
-# pyobjc-framework-Symbols==12.1
-# pyobjc-framework-SyncServices==12.1
-# pyobjc-framework-SystemConfiguration==12.1
-# pyobjc-framework-SystemExtensions==12.1
-# pyobjc-framework-ThreadNetwork==12.1
-# pyobjc-framework-UniformTypeIdentifiers==12.1
-# pyobjc-framework-UserNotifications==12.1
-# pyobjc-framework-UserNotificationsUI==12.1
-# pyobjc-framework-VideoSubscriberAccount==12.1
-# pyobjc-framework-VideoToolbox==12.1
-# pyobjc-framework-Virtualization==12.1
-# pyobjc-framework-Vision==12.1
-# pyobjc-framework-WebKit==12.1
+pyobjc==12.1
+pyobjc-core==12.1
+pyobjc-framework-Accessibility==12.1
+pyobjc-framework-Accounts==12.1
+pyobjc-framework-AddressBook==12.1
+pyobjc-framework-AdServices==12.1
+pyobjc-framework-AdSupport==12.1
+pyobjc-framework-AppleScriptKit==12.1
+pyobjc-framework-AppleScriptObjC==12.1
+pyobjc-framework-ApplicationServices==12.1
+pyobjc-framework-AppTrackingTransparency==12.1
+pyobjc-framework-AudioVideoBridging==12.1
+pyobjc-framework-AuthenticationServices==12.1
+pyobjc-framework-AutomaticAssessmentConfiguration==12.1
+pyobjc-framework-Automator==12.1
+pyobjc-framework-AVFoundation==12.1
+pyobjc-framework-AVKit==12.1
+pyobjc-framework-AVRouting==12.1
+pyobjc-framework-BackgroundAssets==12.1
+pyobjc-framework-BrowserEngineKit==12.1
+pyobjc-framework-BusinessChat==12.1
+pyobjc-framework-CalendarStore==12.1
+pyobjc-framework-CallKit==12.1
+pyobjc-framework-Carbon==12.1
+pyobjc-framework-CFNetwork==12.1
+pyobjc-framework-Cinematic==12.1
+pyobjc-framework-ClassKit==12.1
+pyobjc-framework-CloudKit==12.1
+pyobjc-framework-Cocoa==12.1
+pyobjc-framework-Collaboration==12.1
+pyobjc-framework-ColorSync==12.1
+pyobjc-framework-Contacts==12.1
+pyobjc-framework-ContactsUI==12.1
+pyobjc-framework-CoreAudio==12.1
+pyobjc-framework-CoreAudioKit==12.1
+pyobjc-framework-CoreBluetooth==12.1
+pyobjc-framework-CoreData==12.1
+pyobjc-framework-CoreHaptics==12.1
+pyobjc-framework-CoreLocation==12.1
+pyobjc-framework-CoreMedia==12.1
+pyobjc-framework-CoreMediaIO==12.1
+pyobjc-framework-CoreMIDI==12.1
+pyobjc-framework-CoreML==12.1
+pyobjc-framework-CoreMotion==12.1
+pyobjc-framework-CoreServices==12.1
+pyobjc-framework-CoreSpotlight==12.1
+pyobjc-framework-CoreText==12.1
+pyobjc-framework-CoreWLAN==12.1
+pyobjc-framework-CryptoTokenKit==12.1
+pyobjc-framework-DataDetection==12.1
+pyobjc-framework-DeviceCheck==12.1
+pyobjc-framework-DeviceDiscoveryExtension==12.1
+pyobjc-framework-DictionaryServices==12.1
+pyobjc-framework-DiscRecording==12.1
+pyobjc-framework-DiscRecordingUI==12.1
+pyobjc-framework-DiskArbitration==12.1
+pyobjc-framework-DVDPlayback==12.1
+pyobjc-framework-EventKit==12.1
+pyobjc-framework-ExceptionHandling==12.1
+pyobjc-framework-ExecutionPolicy==12.1
+pyobjc-framework-ExtensionKit==12.1
+pyobjc-framework-ExternalAccessory==12.1
+pyobjc-framework-FileProvider==12.1
+pyobjc-framework-FileProviderUI==12.1
+pyobjc-framework-FinderSync==12.1
+pyobjc-framework-FSEvents==12.1
+pyobjc-framework-FSKit==12.1
+pyobjc-framework-GameCenter==12.1
+pyobjc-framework-GameController==12.1
+pyobjc-framework-GameKit==12.1
+pyobjc-framework-GameplayKit==12.1
+pyobjc-framework-HealthKit==12.1
+pyobjc-framework-ImageCaptureCore==12.1
+pyobjc-framework-InputMethodKit==12.1
+pyobjc-framework-InstallerPlugins==12.1
+pyobjc-framework-InstantMessage==12.1
+pyobjc-framework-Intents==12.1
+pyobjc-framework-IntentsUI==12.1
+pyobjc-framework-IOBluetooth==12.1
+pyobjc-framework-IOBluetoothUI==12.1
+pyobjc-framework-IOSurface==12.1
+pyobjc-framework-iTunesLibrary==12.1
+pyobjc-framework-KernelManagement==12.1
+pyobjc-framework-LatentSemanticMapping==12.1
+pyobjc-framework-LaunchServices==12.1
+pyobjc-framework-libdispatch==12.1
+pyobjc-framework-libxpc==12.1
+pyobjc-framework-LinkPresentation==12.1
+pyobjc-framework-LocalAuthentication==12.1
+pyobjc-framework-LocalAuthenticationEmbeddedUI==12.1
+pyobjc-framework-MailKit==12.1
+pyobjc-framework-MapKit==12.1
+pyobjc-framework-MediaAccessibility==12.1
+pyobjc-framework-MediaExtension==12.1
+pyobjc-framework-MediaLibrary==12.1
+pyobjc-framework-MediaPlayer==12.1
+pyobjc-framework-MediaToolbox==12.1
+pyobjc-framework-Metal==12.1
+pyobjc-framework-MetalFX==12.1
+pyobjc-framework-MetalKit==12.1
+pyobjc-framework-MetalPerformanceShaders==12.1
+pyobjc-framework-MetalPerformanceShadersGraph==12.1
+pyobjc-framework-MetricKit==12.1
+pyobjc-framework-MLCompute==12.1
+pyobjc-framework-ModelIO==12.1
+pyobjc-framework-MultipeerConnectivity==12.1
+pyobjc-framework-NaturalLanguage==12.1
+pyobjc-framework-NetFS==12.1
+pyobjc-framework-Network==12.1
+pyobjc-framework-NetworkExtension==12.1
+pyobjc-framework-NotificationCenter==12.1
+pyobjc-framework-OpenDirectory==12.1
+pyobjc-framework-OSAKit==12.1
+pyobjc-framework-OSLog==12.1
+pyobjc-framework-PassKit==12.1
+pyobjc-framework-PencilKit==12.1
+pyobjc-framework-PHASE==12.1
+pyobjc-framework-Photos==12.1
+pyobjc-framework-PhotosUI==12.1
+pyobjc-framework-PreferencePanes==12.1
+pyobjc-framework-PushKit==12.1
+pyobjc-framework-Quartz==12.1
+pyobjc-framework-QuickLookThumbnailing==12.1
+pyobjc-framework-ReplayKit==12.1
+pyobjc-framework-SafariServices==12.1
+pyobjc-framework-SafetyKit==12.1
+pyobjc-framework-SceneKit==12.1
+pyobjc-framework-ScreenCaptureKit==12.1
+pyobjc-framework-ScreenSaver==12.1
+pyobjc-framework-ScreenTime==12.1
+pyobjc-framework-ScriptingBridge==12.1
+pyobjc-framework-SearchKit==12.1
+pyobjc-framework-Security==12.1
+pyobjc-framework-SecurityFoundation==12.1
+pyobjc-framework-SecurityInterface==12.1
+pyobjc-framework-SecurityUI==12.1
+pyobjc-framework-SensitiveContentAnalysis==12.1
+pyobjc-framework-ServiceManagement==12.1
+pyobjc-framework-SharedWithYou==12.1
+pyobjc-framework-SharedWithYouCore==12.1
+pyobjc-framework-ShazamKit==12.1
+pyobjc-framework-Social==12.1
+pyobjc-framework-SoundAnalysis==12.1
+pyobjc-framework-Speech==12.1
+pyobjc-framework-SpriteKit==12.1
+pyobjc-framework-StoreKit==12.1
+pyobjc-framework-Symbols==12.1
+pyobjc-framework-SyncServices==12.1
+pyobjc-framework-SystemConfiguration==12.1
+pyobjc-framework-SystemExtensions==12.1
+pyobjc-framework-ThreadNetwork==12.1
+pyobjc-framework-UniformTypeIdentifiers==12.1
+pyobjc-framework-UserNotifications==12.1
+pyobjc-framework-UserNotificationsUI==12.1
+pyobjc-framework-VideoSubscriberAccount==12.1
+pyobjc-framework-VideoToolbox==12.1
+pyobjc-framework-Virtualization==12.1
+pyobjc-framework-Vision==12.1
+pyobjc-framework-WebKit==12.1
+pyparsing==3.2.5
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-multipart==0.0.20
 pyttsx3==2.99
 PyYAML==6.0.3
+rdflib==7.5.0
 referencing==0.37.0
+regex==2025.11.3
 requests==2.32.5
 requests-toolbelt==1.0.0
+rfc3986==1.5.0
 rpds-py==0.30.0
 rsa==4.9.1
 scipy==1.15.3
+segments==2.3.0
 sentry-sdk==2.47.0
 shellingham==1.5.4
+six==1.17.0
 smmap==5.0.2
 sniffio==1.3.1
 sortedcontainers==2.4.0
 sounddevice==0.5.3
+soundfile==0.13.1
 soupsieve==2.8
 SQLAlchemy==2.0.44
 sse-starlette==3.0.3
@@ -287,12 +305,14 @@ stdlib-list==0.11.1
 sympy==1.14.0
 tabulate==0.9.0
 tenacity==9.1.2
+termcolor==3.2.0
 tokenizers==0.22.1
 tqdm==4.67.1
 typer-slim==0.20.0
 typing-inspect==0.9.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
+uritemplate==4.2.0
 urllib3==2.6.0
 uuid_utils==0.12.0
 uvicorn==0.38.0
@@ -303,4 +323,3 @@ websockets==15.0.1
 xxhash==3.6.0
 yarl==1.22.0
 zstandard==0.25.0
-piper-tts==1.3.0
