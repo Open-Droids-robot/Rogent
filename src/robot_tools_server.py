@@ -113,6 +113,12 @@ def get_camera_image(session_id: str = None) -> str:
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(rgb_frame)
 
+        # Optimization: Resize to max 800px width if larger
+        if img.size[0] > 800:
+            new_height = int(800 * img.size[1] / img.size[0])
+            img = img.resize((800, new_height), Image.Resampling.LANCZOS)
+            logger.info(f"Image resized to 800x{new_height} for optimization")
+
         # Save to outputs folder with timestamp
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         filename = get_output_path(f"captured_image_{timestamp}.jpg", session_id)
@@ -541,6 +547,7 @@ def _call_vision_model(prompt: str, instruction: str, image_b64: str) -> str:
             
         client = genai.Client(api_key=GOOGLE_API_KEY)
         model_name = os.getenv('PERCEPTION_MODEL', 'gemini-2.5-flash')
+        logger.info(f"Using vision model: {model_name}")
         
         img_bytes = base64.b64decode(image_b64)
         response = client.models.generate_content(

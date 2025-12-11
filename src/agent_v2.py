@@ -27,7 +27,7 @@ from synthesizer import Synthesizer
 
 import weave 
 
-weave.init("open-droids/test-agent-v2")
+weave.init("test-agent-v2")
 
 @weave.op()
 def trace_image(image: Image.Image, label: str = "tool_image"):

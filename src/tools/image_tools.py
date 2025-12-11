@@ -8,6 +8,15 @@ import os
 
 logger = logging.getLogger("robot_mcp")
 
+def get_image_resized(img_path):
+    """
+    Resize image to 800px width while maintaining aspect ratio.
+    """
+    img = Image.open(img_path)
+    img = img.resize(
+        (800, int(800 * img.size[1] / img.size[0])), Image.Resampling.LANCZOS
+    )
+    return img
 
 def save_image_for_analysis(img):
     try:
@@ -39,6 +48,27 @@ def register(mcp):
     #     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
     #     return img_str
+
+    @mcp.tool()
+    def resize_and_optimize_image(image_path: str) -> str:
+        """
+        Resize an image to 800px width for faster rendering and smaller API calls.
+        Returns the path to the resized image.
+        """
+        try:
+            img = get_image_resized(image_path)
+            
+            # Generate new path
+            directory, filename = os.path.split(image_path)
+            name, ext = os.path.splitext(filename)
+            new_filename = f"{name}_resized{ext}"
+            new_path = os.path.join(directory, new_filename)
+            
+            img.save(new_path)
+            return f"Image resized and saved to: {new_path}"
+        except Exception as e:
+            logger.error(f"Error resizing image: {e}")
+            return f"Error: {e}"
 
     @mcp.tool()
     def get_head_camera_image() -> str:
