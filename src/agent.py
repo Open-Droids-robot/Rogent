@@ -305,7 +305,7 @@ class Agent:
         
         self.audio = AudioManager()
         self.transcriber = Transcriber(model_size="tiny.en", device="cpu", compute_type="int8")
-        self.synthesizer = Synthesizer()
+        self.synthesizer = Synthesizer(engine="kokoro", voice="am_echo")
         self.graph = None 
         
         self.audio_buffer = bytearray()

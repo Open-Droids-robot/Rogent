@@ -51,28 +51,28 @@ def register(mcp):
         # --- REAL IMPLEMENTATION (Using /dev/video*) ---
         # # Note: ZED 2 usually outputs side-by-side stereo. We need to split it.
         # # You need to find the correct index (e.g., /dev/video0 -> 0)
-        cap = cv2.VideoCapture(0) 
-        if not cap.isOpened():
-            logger.error("Could not open head camera")
-            return ""
+        # cap = cv2.VideoCapture(0) 
+        # if not cap.isOpened():
+        #     logger.error("Could not open head camera")
+        #     return ""
             
-        ret, frame = cap.read()
-        cap.release()
+        # ret, frame = cap.read()
+        # cap.release()
         
-        if not ret:
-            return ""
+        # if not ret:
+        #     return ""
         
-        # ZED outputs [Left | Right] side-by-side
-        height, width, _ = frame.shape
-        # Crop to get just the left eye (first half of width)
-        left_eye_frame = frame[:, :width//2, :]
+        # # ZED outputs [Left | Right] side-by-side
+        # height, width, _ = frame.shape
+        # # Crop to get just the left eye (first half of width)
+        # left_eye_frame = frame[:, :width//2, :]
         
-        # Convert BGR (OpenCV) to RGB (PIL)
-        img_array = cv2.cvtColor(left_eye_frame, cv2.COLOR_BGR2RGB)
+        # # Convert BGR (OpenCV) to RGB (PIL)
+        # img_array = cv2.cvtColor(left_eye_frame, cv2.COLOR_BGR2RGB)
 
         
         # --- DUMMY IMPLEMENTATION (FOR TESTING) ---
-        # img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+        img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
         
         img = Image.fromarray(img_array)
         save_image_for_analysis(img)
@@ -88,26 +88,26 @@ def register(mcp):
         Obtain an image from the robot's right arms wrist camera (RealSense).
         Returns a base64 encoded JPEG string of the image.
         """
-        logger.info("EXECUTING: get_right_wrist_camera_image")
+        # logger.info("EXECUTING: get_right_wrist_camera_image")
         
-        # --- REAL IMPLEMENTATION (Using /dev/video*) ---
-        # # Find the correct index for Right Wrist (e.g., 2, 4, etc.)
-        cap = cv2.VideoCapture(6) 
-        if not cap.isOpened():
-            logger.error("Could not open right wrist camera")
-            return ""
+        # # --- REAL IMPLEMENTATION (Using /dev/video*) ---
+        # # # Find the correct index for Right Wrist (e.g., 2, 4, etc.)
+        # cap = cv2.VideoCapture(6) 
+        # if not cap.isOpened():
+        #     logger.error("Could not open right wrist camera")
+        #     return ""
         
-        ret, frame = cap.read()
-        cap.release()
+        # ret, frame = cap.read()
+        # cap.release()
         
-        if not ret:
-            return ""
+        # if not ret:
+        #     return ""
         
-        # Convert BGR (OpenCV) to RGB (PIL)
-        img_array = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # # Convert BGR (OpenCV) to RGB (PIL)
+        # img_array = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         # --- DUMMY IMPLEMENTATION (FOR TESTING) ---
-        # img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+        img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
         
         img = Image.fromarray(img_array)
         save_image_for_analysis(img)
