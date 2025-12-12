@@ -27,15 +27,15 @@ from synthesizer import Synthesizer
 
 import weave 
 
-weave.init("test-agent-v2")
+# Load environment variables
+load_dotenv()
+
+weave.init(os.getenv('WEAVE_PROJECT_ID', "open-droids/test-agent-v2"))
 
 @weave.op()
 def trace_image(image: Image.Image, label: str = "tool_image"):
     """Helper to capture images in Weave traces."""
     return "Image Logged"
-
-# Load environment variables
-load_dotenv()
 
 # Configure logging
 init(autoreset=True)
