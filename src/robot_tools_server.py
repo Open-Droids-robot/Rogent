@@ -604,7 +604,9 @@ def _call_vision_model(prompt: str, instruction: str, image_b64: str, json_mode:
         config = None
         if json_mode:
             config = types.GenerateContentConfig(
-                response_mime_type="application/json"
+                response_mime_type="application/json",
+                temperature=os.getenv('TEMPERATURE', 0.5),
+                thinking_config=types.ThinkingConfig(thinking_budget=os.getenv('THINKING_BUDGET', 0)),
             )
 
         response = client.models.generate_content(
@@ -729,6 +731,8 @@ def get_trajectory(instruction: str, session_id: str = None) -> str:
     cleaned_text = result.replace('```json', '').replace('```', '').strip()
     plot_msg = plot_trajectory(cleaned_text, session_id)
     return f"Trajectory: {cleaned_text}\n{plot_msg}"
+
+# TODO: Add code execution tool
 
 # Load tools from the tools package
 load_tools(mcp)
