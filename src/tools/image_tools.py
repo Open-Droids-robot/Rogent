@@ -10,11 +10,11 @@ logger = logging.getLogger("robot_mcp")
 
 def get_image_resized(img_path):
     """
-    Resize image to 800px width while maintaining aspect ratio.
+    Resize image to 1000px width while maintaining aspect ratio.
     """
     img = Image.open(img_path)
     img = img.resize(
-        (800, int(800 * img.size[1] / img.size[0])), Image.Resampling.LANCZOS
+        (1000, int(1000 * img.size[1] / img.size[0])), Image.Resampling.LANCZOS
     )
     return img
 
@@ -70,47 +70,47 @@ def register(mcp):
             logger.error(f"Error resizing image: {e}")
             return f"Error: {e}"
 
-    @mcp.tool()
-    def get_head_camera_image() -> str:
-        """
-        Obtain an image from the robot's head camera (ZED 2).
-        Returns a base64 encoded JPEG string of the image.
-        """
-        logger.info("EXECUTING: get_head_camera_image")
+    # @mcp.tool()
+    # def get_head_camera_image() -> str:
+    #     """
+    #     Obtain an image from the robot's head camera (ZED 2).
+    #     Returns a base64 encoded JPEG string of the image.
+    #     """
+    #     logger.info("EXECUTING: get_head_camera_image")
         
-        # --- REAL IMPLEMENTATION (Using /dev/video*) ---
-        # # Note: ZED 2 usually outputs side-by-side stereo. We need to split it.
-        # # You need to find the correct index (e.g., /dev/video0 -> 0)
-        # cap = cv2.VideoCapture(0) 
-        # if not cap.isOpened():
-        #     logger.error("Could not open head camera")
-        #     return ""
+    #     # --- REAL IMPLEMENTATION (Using /dev/video*) ---
+    #     # # Note: ZED 2 usually outputs side-by-side stereo. We need to split it.
+    #     # # You need to find the correct index (e.g., /dev/video0 -> 0)
+    #     cap = cv2.VideoCapture(6) 
+    #     if not cap.isOpened():
+    #         logger.error("Could not open head camera")
+    #         return ""
             
-        # ret, frame = cap.read()
-        # cap.release()
+    #     ret, frame = cap.read()
+    #     cap.release()
         
-        # if not ret:
-        #     return ""
+    #     if not ret:
+    #         return ""
         
-        # # ZED outputs [Left | Right] side-by-side
-        # height, width, _ = frame.shape
-        # # Crop to get just the left eye (first half of width)
-        # left_eye_frame = frame[:, :width//2, :]
+    #     # ZED outputs [Left | Right] side-by-side
+    #     height, width, _ = frame.shape
+    #     # Crop to get just the left eye (first half of width)
+    #     left_eye_frame = frame[:, :width//2, :]
         
-        # # Convert BGR (OpenCV) to RGB (PIL)
-        # img_array = cv2.cvtColor(left_eye_frame, cv2.COLOR_BGR2RGB)
+    #     # Convert BGR (OpenCV) to RGB (PIL)
+    #     img_array = cv2.cvtColor(left_eye_frame, cv2.COLOR_BGR2RGB)
 
         
-        # --- DUMMY IMPLEMENTATION (FOR TESTING) ---
-        img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+    #     # --- DUMMY IMPLEMENTATION (FOR TESTING) ---
+    #     # img_array = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
         
-        img = Image.fromarray(img_array)
-        save_image_for_analysis(img)
-        buffered = io.BytesIO()
-        img.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    #     img = Image.fromarray(img_array)
+    #     save_image_for_analysis(img)
+    #     buffered = io.BytesIO()
+    #     img.save(buffered, format="JPEG")
+    #     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
-        return img_str
+    #     return img_str
 
     @mcp.tool()
     def get_right_wrist_camera_image() -> str:
