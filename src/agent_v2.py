@@ -153,7 +153,12 @@ class AgentGraph:
                 logger.warning("prompts/persona.txt not found, using default.")
                 system_parts.append("You are a helpful robot assistant named Orin.")
             
-            # perception.txt is now handled via the analyze_scene tool
+            # Load perception.txt
+            if os.path.exists(perception_path):
+                with open(perception_path, "r") as f:
+                    system_parts.append(f.read())
+            else:
+                logger.warning("prompts/perception.txt not found.")
             
             self.system_instruction = "\n\n".join(system_parts)
         except Exception as e:

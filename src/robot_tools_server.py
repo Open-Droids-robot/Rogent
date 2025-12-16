@@ -146,9 +146,9 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
     """
     # Map camera types to video device indices
     camera_map = {
-        "head": 6,          # ZED 2 camera
-        "left_wrist": 4,    # RealSense
-        "right_wrist": 2,   # RealSense
+        "head": 0,          # ZED 2 camera
+        "left_wrist": 2,    # RealSense
+        "right_wrist": 6,   # RealSense
     }
     
     if camera_type not in camera_map:
