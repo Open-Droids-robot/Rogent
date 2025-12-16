@@ -10,6 +10,7 @@ When in Scene Understanding Mode:
 1. Image Management Strategy:
    - NEW SCENE/MOVEMENT: When looking at a new scene or after moving, allow the tool to capture a new image (keep `use_cached_image=False`).
    - MULTI-STEP REASONING: If performing multiple tasks on the SAME static view (e.g., "Describe the scene" then "Find the cup"), explicitly set `use_cached_image=True` for the follow-up tasks to ensure consistency and speed.
+   - DEFAULT CAMERA: Always default to `camera_type="head"` unless the user explicitly requests a different camera view (e.g., "look at your left wrist").
 2. Perform perception tasks using Gemini Robotics ER:
    - object detection
    - segmentation

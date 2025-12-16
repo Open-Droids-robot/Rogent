@@ -134,19 +134,37 @@ def get_latest_image(session_id: str = None) -> str:
 
 # TODO: Rename get_camera_image
 @mcp.tool()
-def get_camera_image(session_id: str = None) -> str:
+def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
     """
-    Obtain an image from the robot's camera.
+    Obtain an image from one of the robot's cameras.
+    
+    Args:
+        camera_type: Type of camera to use. Options: "head", "left_wrist", "right_wrist"
+        session_id: Optional session identifier for organizing outputs
+    
     Returns a base64 encoded JPEG string of the image.
     """
-    logger.info(f"EXECUTING: get_camera_image")
+    # Map camera types to video device indices
+    camera_map = {
+        "head": 6,          # ZED 2 camera
+        "left_wrist": 4,    # RealSense
+        "right_wrist": 2,   # RealSense
+    }
+    
+    if camera_type not in camera_map:
+        error_msg = f"Invalid camera_type: '{camera_type}'. Valid options: {list(camera_map.keys())}"
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
+    
+    camera_index = camera_map[camera_type]
+    logger.info(f"EXECUTING: get_camera_image(camera_type='{camera_type}', index={camera_index})")
 
-    # Initialize camera (0 is usually default webcam)
-    cap = cv2.VideoCapture(0)  # change to correct camera
+    # Initialize camera
+    cap = cv2.VideoCapture(camera_index)
 
     if not cap.isOpened():
-        logger.error("Could not open camera")
-        return "Error: Could not open camera."
+        logger.error(f"Could not open {camera_type} camera (index {camera_index})")
+        return f"Error: Could not open {camera_type} camera."
 
     try:
         # Allow camera to warm up
@@ -156,14 +174,12 @@ def get_camera_image(session_id: str = None) -> str:
         ret, frame = cap.read()
 
         if not ret:
-            logger.error("Failed to capture frame")
-            return "Error: Failed to capture frame."
+            logger.error(f"Failed to capture frame from {camera_type} camera")
+            return f"Error: Failed to capture frame from {camera_type} camera."
 
-        # TODO: Refactor code; perhaps creating ABC for camera types?
-        # Handle ZED Camera (Side-by-Side Stereo)
-        # If the aspect ratio is 2:1 or wider, it's likely a stereo image.
+        # Handle ZED Camera (Side-by-Side Stereo) - only for head camera
         height, width, _ = frame.shape
-        if width > height * 1.8:  # Simple heuristic for side-by-side
+        if camera_type == "head" and width > height * 1.8:  # Simple heuristic for side-by-side
             # Crop to get just the left eye (first half of width)
             frame = frame[:, : width // 2, :]
             logger.info("Detected stereo image: Cropped to left eye.")
@@ -180,9 +196,9 @@ def get_camera_image(session_id: str = None) -> str:
 
         # Save to outputs folder with timestamp
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = get_output_path(f"captured_image_{timestamp}.jpg", session_id)
+        filename = get_output_path(f"captured_image_{camera_type}_{timestamp}.jpg", session_id)
         img.save(filename)
-        logger.info(f"Image saved to {filename}")
+        logger.info(f"Image from {camera_type} camera saved to {filename}")
 
         # Convert to Base64
         buffered = io.BytesIO()
@@ -711,22 +727,26 @@ def _call_vision_model(
 
 @mcp.tool()
 def understand_scene(
-    instruction: str, use_cached_image: bool = False, session_id: str = None
+    instruction: str,
+    use_cached_image: bool = False,
+    camera_type: str = "head",
+    session_id: str = None,
 ) -> str:
     """
     Get a natural language description of the scene.
     Args:
         instruction: Specific question (e.g. "Describe the scene", "Is it safe to move?").
         use_cached_image: If True, use the most recent captured image instead of taking a new one.
+        camera_type: Camera to use if not cached. Options: "head", "left_wrist", "right_wrist".
     """
     logger.info(
-        f"EXECUTING: understand_scene('{instruction}', cached={use_cached_image})"
+        f"EXECUTING: understand_scene('{instruction}', cached={use_cached_image}, camera={camera_type})"
     )
 
     if use_cached_image:
         img_b64 = get_latest_image(session_id)
     else:
-        img_b64 = get_camera_image(session_id)
+        img_b64 = get_camera_image(camera_type, session_id)
 
     if img_b64.startswith("Error"):
         return img_b64
@@ -741,22 +761,26 @@ def understand_scene(
 
 @mcp.tool()
 def detect_objects(
-    instruction: str, use_cached_image: bool = False, session_id: str = None
+    instruction: str,
+    use_cached_image: bool = False,
+    camera_type: str = "head",
+    session_id: str = None,
 ) -> str:
     """
     Detect objects and return their point locations.
     Args:
         instruction: E.g. "Find the cup", "Where is the bottle?".
         use_cached_image: If True, use the most recent captured image instead of taking a new one.
+        camera_type: Camera to use if not cached. Options: "head", "left_wrist", "right_wrist".
     """
     logger.info(
-        f"EXECUTING: detect_objects('{instruction}', cached={use_cached_image})"
+        f"EXECUTING: detect_objects('{instruction}', cached={use_cached_image}, camera={camera_type})"
     )
 
     if use_cached_image:
         img_b64 = get_latest_image(session_id)
     else:
-        img_b64 = get_camera_image(session_id)
+        img_b64 = get_camera_image(camera_type, session_id)
 
     if img_b64.startswith("Error"):
         return img_b64
@@ -780,22 +804,26 @@ def detect_objects(
 
 @mcp.tool()
 def get_bounded_boxes(
-    instruction: str, use_cached_image: bool = False, session_id: str = None
+    instruction: str,
+    use_cached_image: bool = False,
+    camera_type: str = "head",
+    session_id: str = None,
 ) -> str:
     """
     Detect objects and return/plot bounding boxes.
     Args:
         instruction: E.g. "Box all the fruits", "Draw a box around the cup".
         use_cached_image: If True, use the most recent captured image instead of taking a new one.
+        camera_type: Camera to use if not cached. Options: "head", "left_wrist", "right_wrist".
     """
     logger.info(
-        f"EXECUTING: get_bounded_boxes('{instruction}', cached={use_cached_image})"
+        f"EXECUTING: get_bounded_boxes('{instruction}', cached={use_cached_image}, camera={camera_type})"
     )
 
     if use_cached_image:
         img_b64 = get_latest_image(session_id)
     else:
-        img_b64 = get_camera_image(session_id)
+        img_b64 = get_camera_image(camera_type, session_id)
 
     if img_b64.startswith("Error"):
         return img_b64
@@ -819,22 +847,26 @@ def get_bounded_boxes(
 
 @mcp.tool()
 def get_trajectory(
-    instruction: str, use_cached_image: bool = False, session_id: str = None
+    instruction: str,
+    use_cached_image: bool = False,
+    camera_type: str = "head",
+    session_id: str = None,
 ) -> str:
     """
     Plan a movement trajectory.
     Args:
         instruction: E.g. "Plan a path to the door".
         use_cached_image: If True, use the most recent captured image instead of taking a new one.
+        camera_type: Camera to use if not cached. Options: "head", "left_wrist", "right_wrist".
     """
     logger.info(
-        f"EXECUTING: get_trajectory('{instruction}', cached={use_cached_image})"
+        f"EXECUTING: get_trajectory('{instruction}', cached={use_cached_image}, camera={camera_type})"
     )
 
     if use_cached_image:
         img_b64 = get_latest_image(session_id)
     else:
-        img_b64 = get_camera_image(session_id)
+        img_b64 = get_camera_image(camera_type, session_id)
 
     if img_b64.startswith("Error"):
         return img_b64
