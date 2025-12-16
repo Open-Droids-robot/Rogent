@@ -92,7 +92,7 @@ def get_camera_image(session_id: str = None) -> str:
     logger.info(f"EXECUTING: get_camera_image")
 
     # Initialize camera (0 is usually default webcam)
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(6)
 
     if not cap.isOpened():
         logger.error("Could not open camera")
@@ -108,6 +108,15 @@ def get_camera_image(session_id: str = None) -> str:
         if not ret:
             logger.error("Failed to capture frame")
             return "Error: Failed to capture frame."
+
+        # TODO: Refactor code; perhaps creating ABC for camera types?
+        # Handle ZED Camera (Side-by-Side Stereo)
+        # If the aspect ratio is 2:1 or wider, it's likely a stereo image.
+        height, width, _ = frame.shape
+        if width > height * 1.8:  # Simple heuristic for side-by-side
+            # Crop to get just the left eye (first half of width)
+            frame = frame[:, :width//2, :]
+            logger.info("Detected stereo image: Cropped to left eye.")
 
         # Convert BGR (OpenCV) to RGB (PIL)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
