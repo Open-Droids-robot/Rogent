@@ -5,6 +5,7 @@ import os
 import tempfile
 import sys
 import subprocess
+import re
 from gtts import gTTS
 import pyttsx3
 from kokoro_onnx import Kokoro
@@ -30,6 +31,13 @@ class Synthesizer:
         # Piper settings
         self.piper_model = os.path.join(os.getcwd(), "models", "en_US-lessac-medium.onnx")
         self.piper_binary = os.path.join(os.getcwd(), ".venv", "bin", "piper")
+
+        # Streaming queues
+        self.synthesis_queue = asyncio.Queue()
+        self.playback_queue = asyncio.Queue()
+        self.text_buffer = ""
+        self.is_speaking = False
+        self._workers_running = False
 
     def _ensure_kokoro_models(self):
         """Downloads Kokoro model files if they don't exist."""
@@ -69,34 +77,100 @@ class Synthesizer:
                         os.remove(path)
                     raise
 
-    async def speak(self, text):
-        logger.info(f"Synthesizing: {text}")
+    async def start_workers(self):
+        """Starts the background workers for synthesis and playback."""
+        if not self._workers_running:
+            self._workers_running = True
+            asyncio.create_task(self._synthesis_worker())
+            asyncio.create_task(self._playback_worker())
+            logger.info("Synthesizer workers started.")
+
+    async def feed_text(self, text_chunk):
+        """Feeds text chunks to the synthesizer. Buffers until a sentence is complete."""
+        self.text_buffer += text_chunk
         
+        # Split by sentence endings (. ? ! or newline)
+        # We use a lookbehind to keep the delimiter
+        sentences = re.split(r'(?<=[.?!])\s+', self.text_buffer)
+        
+        # The last part might be incomplete, so we keep it in the buffer
+        if len(sentences) > 1:
+            for sentence in sentences[:-1]:
+                if sentence.strip():
+                    await self.synthesis_queue.put(sentence.strip())
+            self.text_buffer = sentences[-1]
+        elif self.text_buffer.endswith('\n'): # Handle explicit newlines as breaks
+             if self.text_buffer.strip():
+                 await self.synthesis_queue.put(self.text_buffer.strip())
+             self.text_buffer = ""
+
+    async def flush(self):
+        """Flushes any remaining text in the buffer."""
+        if self.text_buffer.strip():
+            await self.synthesis_queue.put(self.text_buffer.strip())
+        self.text_buffer = ""
+
+    async def _synthesis_worker(self):
+        logger.info("Synthesis worker started.")
+        while True:
+            text = await self.synthesis_queue.get()
+            try:
+                logger.info(f"Synthesizing sentence: {text}")
+                # Use the existing synthesis logic but return the file path
+                # We need to adapt the _speak_* methods to return the path instead of playing
+                # For now, we'll wrap the existing logic or refactor slightly
+                
+                temp_filename = await self._generate_audio(text)
+                if temp_filename:
+                    await self.playback_queue.put(temp_filename)
+            except Exception as e:
+                logger.error(f"Synthesis failed for '{text}': {e}")
+            finally:
+                self.synthesis_queue.task_done()
+
+    async def _playback_worker(self):
+        logger.info("Playback worker started.")
+        while True:
+            filename = await self.playback_queue.get()
+            try:
+                self.is_speaking = True
+                await self._play_audio(filename)
+            except Exception as e:
+                logger.error(f"Playback failed for {filename}: {e}")
+            finally:
+                self.is_speaking = False
+                if os.path.exists(filename):
+                    os.remove(filename)
+                self.playback_queue.task_done()
+
+    async def _generate_audio(self, text):
+        """Generates audio file for the given text using the selected engine."""
         # Determine order based on engine preference
         engines = []
         if self.engine == "kokoro":
-            engines = [self._speak_kokoro, self._speak_piper, self._speak_gtts, self._speak_pyttsx3]
+            engines = [self._generate_kokoro, self._generate_piper, self._generate_gtts, self._generate_pyttsx3]
         elif self.engine == "piper":
-            engines = [self._speak_piper, self._speak_kokoro, self._speak_gtts, self._speak_pyttsx3]
+            engines = [self._generate_piper, self._generate_kokoro, self._generate_gtts, self._generate_pyttsx3]
         elif self.engine == "edge":
-            engines = [self._speak_edge, self._speak_kokoro, self._speak_gtts, self._speak_pyttsx3]
+            engines = [self._generate_edge, self._generate_kokoro, self._generate_gtts, self._generate_pyttsx3]
         elif self.engine == "gtts":
-            engines = [self._speak_gtts, self._speak_kokoro, self._speak_edge, self._speak_pyttsx3]
+            engines = [self._generate_gtts, self._generate_kokoro, self._generate_edge, self._generate_pyttsx3]
         elif self.engine == "pyttsx3":
-            engines = [self._speak_pyttsx3, self._speak_kokoro, self._speak_gtts, self._speak_edge]
+            engines = [self._generate_pyttsx3, self._generate_kokoro, self._generate_gtts, self._generate_edge]
         else:
-             engines = [self._speak_kokoro, self._speak_piper, self._speak_gtts, self._speak_pyttsx3]
+             engines = [self._generate_kokoro, self._generate_piper, self._generate_gtts, self._generate_pyttsx3]
 
-        for speak_func in engines:
+        for gen_func in engines:
             try:
-                await speak_func(text)
-                return
+                return await gen_func(text)
             except Exception as e:
-                logger.warning(f"{speak_func.__name__} failed ({e}). Trying next...")
+                logger.warning(f"{gen_func.__name__} failed ({e}). Trying next...")
         
-        logger.error("All TTS engines failed. No speech output.")
+        logger.error("All TTS engines failed. No audio generated.")
+        return None
 
-    async def _speak_kokoro(self, text):
+    # Refactored generation methods to return filename only
+    async def _generate_kokoro(self, text):
         if not os.path.exists(self.kokoro_model) or not os.path.exists(self.kokoro_voices):
             raise FileNotFoundError("Kokoro model files not found.")
 
@@ -111,11 +185,9 @@ class Synthesizer:
                 sf.write(temp_filename, samples, sample_rate)
                 return temp_filename
 
-        temp_filename = await asyncio.to_thread(_generate)
-        await self._play_audio(temp_filename)
-        os.remove(temp_filename)
+        return await asyncio.to_thread(_generate)
 
-    async def _speak_piper(self, text):
+    async def _generate_piper(self, text):
         if not os.path.exists(self.piper_model):
             raise FileNotFoundError(f"Piper model not found at {self.piper_model}")
         
@@ -146,49 +218,45 @@ class Synthesizer:
                 
             return temp_filename
 
-        temp_filename = await asyncio.to_thread(_generate)
-        await self._play_audio(temp_filename)
-        os.remove(temp_filename)
+        return await asyncio.to_thread(_generate)
 
-    async def _speak_edge(self, text):
+    async def _generate_edge(self, text):
         communicate = edge_tts.Communicate(text, self.voice, rate=self.rate)
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as fp:
             temp_filename = fp.name
         
         await communicate.save(temp_filename)
-        await self._play_audio(temp_filename)
-        os.remove(temp_filename)
+        return temp_filename
 
-    async def _speak_gtts(self, text):
-        # gTTS is synchronous, run in thread
+    async def _generate_gtts(self, text):
         def _generate():
             tts = gTTS(text=text, lang='en')
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as fp:
                 tts.save(fp.name)
                 return fp.name
-        
-        temp_filename = await asyncio.to_thread(_generate)
-        await self._play_audio(temp_filename)
-        os.remove(temp_filename)
+        return await asyncio.to_thread(_generate)
 
-    async def _speak_pyttsx3(self, text):
+    async def _generate_pyttsx3(self, text):
         def _generate():
             engine = pyttsx3.init()
-            # Try to set a good voice
-            # voices = engine.getProperty('voices')
-            # engine.setProperty('voice', voices[0].id) 
-            
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fp:
                 temp_filename = fp.name
-            
-            # pyttsx3 save_to_file is also synchronous
             engine.save_to_file(text, temp_filename)
             engine.runAndWait()
             return temp_filename
+        return await asyncio.to_thread(_generate)
 
-        temp_filename = await asyncio.to_thread(_generate)
-        await self._play_audio(temp_filename)
-        os.remove(temp_filename)
+    # Legacy speak method for compatibility (blocking-ish)
+    async def speak(self, text):
+        logger.info(f"Synthesizing (Legacy): {text}")
+        await self.feed_text(text)
+        await self.flush()
+        # Wait for queues to empty? 
+        # For legacy behavior, we might want to wait, but since we are moving to streaming,
+        # we can just let it run in background.
+        # If we need to block until finished:
+        # await self.synthesis_queue.join()
+        # await self.playback_queue.join()
 
     async def _play_audio(self, filename):
         player_cmds = []
@@ -230,11 +298,15 @@ if __name__ == "__main__":
     async def main():
         logging.basicConfig(level=logging.INFO)
         s = Synthesizer(engine="kokoro", voice="am_echo")
-        print("Testing Kokoro...")
-        await s.speak("Testing Kokoro playback with am_echo.")
+        await s.start_workers()
         
-        print("Testing gTTS...")
-        s.engine = "gtts"
-        await s.speak("Testing gTTS playback.")
+        print("Testing Streaming...")
+        await s.feed_text("This is the first sentence. ")
+        await asyncio.sleep(1)
+        await s.feed_text("And this is the second one, arriving later. ")
+        await s.flush()
+        
+        # Keep alive to let it finish
+        await asyncio.sleep(5)
 
     asyncio.run(main())

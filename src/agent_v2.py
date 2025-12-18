@@ -113,9 +113,10 @@ def mcp_schema_to_gemini_schema(schema: dict) -> types.Schema:
 from contextlib import AsyncExitStack
 
 class AgentGraph:
-    def __init__(self, tool_map: dict, tools_schema: list):
+    def __init__(self, tool_map: dict, tools_schema: list, synthesizer: Synthesizer = None):
         self.tool_map = tool_map
         self.tools_schema = tools_schema
+        self.synthesizer = synthesizer
         
         # Initialize the modern GenAI client
         self.client = genai.Client(api_key=GOOGLE_API_KEY)
@@ -186,9 +187,8 @@ class AgentGraph:
     async def agent_node(self, state: AgentState):
         contents = state['contents']
         try:
-            # Use the modern SDK's async API
-            # contents is a list of types.Content objects (or compatible dicts)
-            response = await self.client.aio.models.generate_content(
+            # Use the modern SDK's async API with streaming
+            response_stream = await self.client.aio.models.generate_content_stream(
                 model=self.model_name,
                 contents=contents,
                 config=types.GenerateContentConfig(
@@ -196,13 +196,56 @@ class AgentGraph:
                     tools=[self.tool_config]
                 )
             )
-            # Response handling
-            if not response.candidates:
-                 logger.error("No candidates returned from Gemini.")
+            
+            full_text = ""
+            function_calls = []
+            
+            async for chunk in response_stream:
+                # Handle text chunks
+                if chunk.candidates and chunk.candidates[0].content.parts:
+                    for part in chunk.candidates[0].content.parts:
+                        if part.text:
+                            text_chunk = part.text
+                            full_text += text_chunk
+                            # Feed to synthesizer if available
+                            if self.synthesizer:
+                                await self.synthesizer.feed_text(text_chunk)
+                        
+                        # Handle function calls (accumulate them)
+                        if part.function_call:
+                            function_calls.append(part.function_call)
+
+            # Flush synthesizer buffer at the end of the stream
+            if self.synthesizer:
+                await self.synthesizer.flush()
+
+            # Construct the final content object
+            final_parts = []
+            if full_text:
+                final_parts.append(types.Part(text=full_text))
+            
+            # Reconstruct function calls from stream
+            # Note: Gemini stream might split function calls or provide them fully. 
+            # In the Python SDK, `part.function_call` in a chunk is usually complete or the SDK handles assembly?
+            # Actually, for function calls, it's safer to rely on the aggregated response if possible, 
+            # but generate_content_stream yields chunks. 
+            # Let's assume the last chunk or the aggregation of parts covers it.
+            # A safer approach for function calls in stream is to check if we got any.
+            
+            # If we have function calls, we need to return them.
+            # Since we might have streamed text AND function calls (rare but possible),
+            # we should include both.
+            
+            for fc in function_calls:
+                 final_parts.append(types.Part(function_call=fc))
+                 
+            if not final_parts:
+                 logger.error("No content returned from Gemini Stream.")
                  return {"contents": [types.Content(role="model", parts=[types.Part(text="I didn't get a response.")])]}
 
-            new_content = response.candidates[0].content
+            new_content = types.Content(role="model", parts=final_parts)
             return {"contents": [new_content]}
+            
         except Exception as e:
             logger.error(f"Gemini Error: {e}")
             return {"contents": [types.Content(role="model", parts=[types.Part(text=f"I encountered an error: {e}")])]}
@@ -304,7 +347,7 @@ class AgentGraph:
                         except Exception as e:
                             logger.warning(f"Failed to trace image: {e}")
                     # --------------------------------
-
+                    
                     # --- Trace Image for Plotting Tools ---
                     # Update this line to include new tools: detect_objects, get_bounded_boxes, get_trajectory
                     plotting_tools = [
@@ -468,6 +511,9 @@ class Agent:
         logger.info(f"Starting Agent V2 {self.robot_name} (LangGraph + Modern GenAI SDK + Multi-Server MCP)...")
         self.audio.start()
         
+        # Start Synthesizer Workers
+        await self.synthesizer.start_workers()
+        
         # Determine paths relative to this script
         base_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(base_dir)
@@ -544,8 +590,8 @@ class Agent:
                 logger.error("No tools loaded! Please check if server scripts exist and are running.")
                 # We can continue but agent won't have tools
                 
-            # Initialize Graph with aggregated tools
-            self.graph = AgentGraph(tool_map, tools_schema)
+            # Initialize Graph with aggregated tools AND synthesizer
+            self.graph = AgentGraph(tool_map, tools_schema, synthesizer=self.synthesizer)
             
             logger.info("Agent V2 is READY. Speak into the microphone or type text.")
             
@@ -564,6 +610,11 @@ class Agent:
 
                 while not self.audio.audio_queue.empty():
                     frame_bytes = self.audio.audio_queue.get()
+                    
+                    # Skip processing if speaking
+                    if self.synthesizer.is_speaking:
+                        continue
+
                     is_speech = self.audio.vad.is_speech(frame_bytes, self.audio.sample_rate)
                     
                     if is_speech:
@@ -621,9 +672,6 @@ class Agent:
             
             logger.info(f"Agent Response: {response_text}")
             
-            if response_text:
-                await self.speak(response_text)
-                
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -631,9 +679,11 @@ class Agent:
             await self.speak("I encountered an error.")
 
     async def speak(self, text):
-        self.audio.set_speaking_state(True)
-        await self.synthesizer.speak(text)
-        self.audio.set_speaking_state(False)
+        # This is now mostly for fallback or internal messages
+        # We use feed_text to leverage the streaming pipeline
+        await self.synthesizer.feed_text(text)
+        await self.synthesizer.flush()
+
 
 if __name__ == "__main__":
     agent = Agent()
