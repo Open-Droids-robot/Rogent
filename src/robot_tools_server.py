@@ -213,6 +213,23 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
         )
         img.save(filename)
         logger.info(f"Image from {camera_type} camera saved to {filename}")
+        # Save camera/head pose metadata for this captured frame so object coordinates
+        # can later be interpreted relative to the camera frame.
+        try:
+            camera_pos = _get_current_camera_position()
+            meta = {
+                "image_path": filename,
+                "camera_type": camera_type,
+                "timestamp": timestamp,
+                "camera_position": camera_pos,
+                "image_size": {"width": img.size[0], "height": img.size[1]},
+            }
+            meta_filename = f"{filename}.meta.json"
+            with open(meta_filename, "w") as mf:
+                json.dump(meta, mf)
+            logger.info(f"Saved camera metadata to {meta_filename}")
+        except Exception as e:
+            logger.warning(f"Failed to save camera metadata for {filename}: {e}")
 
         # Convert to Base64
         buffered = io.BytesIO()
@@ -225,24 +242,89 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
         cap.release()
 
 
+# Global state to track camera position (simulated for now)
+# In a real robot, this would query the hardware.
+_CAMERA_STATE = {"pan": 500, "tilt": 500}
+
+
+def _get_current_camera_position():
+    """Helper to get current pan/tilt values."""
+    return _CAMERA_STATE
+
+
 @mcp.tool()
-def move_camera(direction: str) -> str:
+def move_camera(direction: str, pan: int = None, tilt: int = None) -> str:
     """
-    Simulate moving the camera/robot.
+    Simulate moving the camera/robot using servo commands.
 
     Args:
-        direction: Description of where to move (e.g. "left", "right", "pan 30 degrees").
+        direction: Description of where to move (e.g. "left", "right", "up", "down").
+        pan: (Optional) Exact servo value for panning (ID 2). Range 1 (right) to 1000 (left).
+        tilt: (Optional) Exact servo value for tilting (ID 1). Range 1 (down) to 1000 (up).
     """
-    logger.info(f"EXECUTING: move_camera(direction='{direction}')")
+    logger.info(
+        f"EXECUTING: move_camera(direction='{direction}', pan={pan}, tilt={tilt})"
+    )
+
+    # Get current state
+    current_state = _get_current_camera_position()
+    current_pan = current_state["pan"]
+    current_tilt = current_state["tilt"]
+    step_size = 200
+
+    # Calculate target values if direction string is used
+    target_pan = pan
+    target_tilt = tilt
+
+    if target_pan is None and target_tilt is None:
+        direction_lower = direction.lower()
+        if "left" in direction_lower:
+            target_pan = current_pan + step_size  # Left is higher value (towards 1000)
+        elif "right" in direction_lower:
+            target_pan = current_pan - step_size  # Right is lower value (towards 1)
+        else:
+            target_pan = current_pan  # Keep current if not changing
+
+        if "up" in direction_lower:
+            target_tilt = current_tilt + step_size  # Up is higher value (towards 1000)
+        elif "down" in direction_lower:
+            target_tilt = current_tilt - step_size  # Down is lower value (towards 1)
+        else:
+            target_tilt = current_tilt  # Keep current if not changing
+
+        # Clamp values
+        if target_pan is not None:
+            target_pan = max(1, min(1000, target_pan))
+        if target_tilt is not None:
+            target_tilt = max(1, min(1000, target_tilt))
+
+    # Update global state (Simulated hardware update)
+    if target_pan is not None:
+        _CAMERA_STATE["pan"] = target_pan
+    if target_tilt is not None:
+        _CAMERA_STATE["tilt"] = target_tilt
+
+    # Construct the command log
+    cmd_log = []
+    if target_pan is not None:
+        cmd_log.append(f"Servo ID 2 (Pan): {target_pan} [1=Right, 1000=Left]")
+    if target_tilt is not None:
+        cmd_log.append(f"Servo ID 1 (Tilt): {target_tilt} [1=Down, 1000=Up]")
+
     logger.info(
         f"{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
     )
+    if cmd_log:
+        for log in cmd_log:
+            logger.info(f"{Fore.YELLOW}  -> {log}{Style.RESET_ALL}")
+
     logger.info(
         f"{Fore.YELLOW}Waiting 5 seconds for manual adjustment...{Style.RESET_ALL}"
     )
     time.sleep(5)
     logger.info(f"{Fore.GREEN}Resuming...{Style.RESET_ALL}")
-    return f"Camera moved {direction}. You can now capture an image."
+
+    return f"Camera moved {direction}. New targets: Pan={_CAMERA_STATE['pan']}, Tilt={_CAMERA_STATE['tilt']}."
 
 
 @mcp.tool()
@@ -812,8 +894,46 @@ def detect_objects(
         return result
 
     cleaned_text = result.replace("```json", "").replace("```", "").strip()
+    # Save detections + camera metadata so each detection can be traced to the camera frame.
+    try:
+        detections = json.loads(cleaned_text)
+    except Exception:
+        detections = None
+
+    try:
+        # Use the most recently captured image as the reference
+        latest_image = _get_latest_captured_image_path(session_id)
+    except Exception:
+        latest_image = None
+
+    try:
+        # Prefer metadata saved at capture time, otherwise query current camera state
+        camera_meta = None
+        if latest_image:
+            meta_path = f"{latest_image}.meta.json"
+            if os.path.exists(meta_path):
+                with open(meta_path, "r") as mf:
+                    camera_meta = json.load(mf)
+        if camera_meta is None:
+            camera_meta = {"camera_position": _get_current_camera_position()}
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        detections_meta = {
+            "image_path": latest_image,
+            "timestamp": timestamp,
+            "camera_meta": camera_meta,
+            "detections": detections,
+            "raw_detection_text": cleaned_text,
+        }
+        meta_outfile = get_output_path(f"detections_meta_{timestamp}.json", session_id)
+        with open(meta_outfile, "w") as outf:
+            json.dump(detections_meta, outf, indent=2)
+        logger.info(f"Saved detection metadata to {meta_outfile}")
+    except Exception as e:
+        logger.warning(f"Failed to save detection metadata: {e}")
+
     plot_msg = plot_detections(cleaned_text, session_id)
-    return f"Detections: {cleaned_text}\n{plot_msg}"
+    return f"Detections: {cleaned_text}\n{plot_msg}\nMetadata saved to {meta_outfile if 'meta_outfile' in locals() else 'n/a'}"
 
 
 @mcp.tool()
@@ -917,7 +1037,7 @@ def log_search_step(step: int, image_path: str, result: str):
 @weave.op()
 def search_until_found(
     object_name: str,
-    max_attempts: int = 5,
+    max_attempts: int = 8,
     session_id: str = None,
 ) -> str:
     """

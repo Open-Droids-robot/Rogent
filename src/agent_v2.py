@@ -72,6 +72,7 @@ if not GOOGLE_API_KEY:
 
 import operator
 import select
+import re
 
 
 # --- LangGraph State ---
@@ -351,31 +352,47 @@ class AgentGraph:
                     # --- Trace Image for Plotting Tools ---
                     # Update this line to include new tools: detect_objects, get_bounded_boxes, get_trajectory
                     plotting_tools = [
-                        "plot_detections", 
-                        "plot_bounding_boxes", 
-                        "plot_trajectory", 
-                        "detect_objects", 
-                        "get_bounded_boxes", 
-                        "get_trajectory"
+                        "plot_detections",
+                        "plot_bounding_boxes",
+                        "plot_trajectory",
+                        "detect_objects",
+                        "get_bounded_boxes",
+                        "get_trajectory",
                     ]
-                                      
-                    if tool_name in plotting_tools and "saved to" in result_text:
+
+                    if tool_name in plotting_tools:
                         try:
-                            # Extract filename from "Visualization saved to outputs/filename.jpg"
-                            # We look for the last word or parse the path
-                            parts = result_text.split()
-                            filename = parts[-1] # Assuming filename is the last word
-                            
-                            # Clean up filename if it has punctuation
-                            filename = filename.rstrip('.')
-                            
-                            if os.path.exists(filename):
-                                img = Image.open(filename)
-                                trace_image(img, label=f"{tool_name}_result")
-                                logger.info(f"Logged {tool_name} image to Weave.")
-                            else:
-                                logger.warning(f"Could not find file {filename} to log to Weave.")
-                                
+                            # Try to extract the filename/path from the tool result robustly.
+                            # Prefer a "saved to <path>" pattern, fallback to last token.
+                            filename = None
+                            if isinstance(result_text, str):
+                                m = re.search(r"saved to\\s+(.+)", result_text, flags=re.IGNORECASE)
+                                if m:
+                                    filename = m.group(1).strip()
+                                    # If the match contains multiple lines, keep only the first line
+                                    filename = filename.splitlines()[0].strip()
+                                    # Remove surrounding quotes or trailing punctuation
+                                    filename = filename.strip('\"\\' + " .")
+                                else:
+                                    # Fallback: take last token heuristic
+                                    parts = result_text.split()
+                                    if parts:
+                                        filename = parts[-1].strip('\"\\' + " .")
+
+                            if filename:
+                                # Resolve relative path to absolute to ensure agent can access it
+                                if not os.path.isabs(filename):
+                                    filename = os.path.abspath(filename)
+
+                                if os.path.exists(filename):
+                                    try:
+                                        img = Image.open(filename)
+                                        trace_image(img, label=f"{tool_name}_result")
+                                        logger.info(f"Logged {tool_name} image to Weave: {filename}")
+                                    except Exception as e:
+                                        logger.warning(f"Failed to open/trace image {filename}: {e}")
+                                else:
+                                    logger.warning(f"Could not find file {filename} to log to Weave.")
                         except Exception as e:
                             logger.warning(f"Failed to trace plot image: {e}")
                     # -------------------------------------
