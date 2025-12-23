@@ -46,6 +46,7 @@ STYLE:
 CAPABILITIES:
 - You have specific vision tools for different tasks. Choose the specific tool:
   - `detect_objects`: For finding specific items (returns points).
+  - `search_until_found`: For actively searching for an object by moving the camera (use this when object is not visible).
   - `get_bounded_boxes`: For drawing boxes around items (use this if user asks for boxes).
   - `get_trajectory`: For planning movement paths.
   - `understand_scene`: For general description or safety checks.

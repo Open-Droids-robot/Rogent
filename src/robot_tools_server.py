@@ -7,6 +7,8 @@ from PIL import Image, ImageDraw, ImageFont
 import io
 import cv2
 import time
+import re
+import weave
 from googlesearch import search as google_search
 import glob
 import json
@@ -86,6 +88,12 @@ logger = logging.getLogger("robot_mcp")
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# Initialize Weave
+try:
+    weave.init(os.getenv("WEAVE_PROJECT_ID", "open-droids/test-agent-v2"))
+except Exception as e:
+    logger.warning(f"Weave init failed: {e}")
+
 # Create the MCP server
 mcp = FastMCP("RobotTools")
 
@@ -137,27 +145,29 @@ def get_latest_image(session_id: str = None) -> str:
 def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
     """
     Obtain an image from one of the robot's cameras.
-    
+
     Args:
         camera_type: Type of camera to use. Options: "head", "left_wrist", "right_wrist"
         session_id: Optional session identifier for organizing outputs
-    
+
     Returns a base64 encoded JPEG string of the image.
     """
     # Map camera types to video device indices
     camera_map = {
-        "head": 0,          # ZED 2 camera
-        "left_wrist": 2,    # RealSense
-        "right_wrist": 6,   # RealSense
+        "head": 0,  # ZED 2 camera
+        "left_wrist": 2,  # RealSense
+        "right_wrist": 6,  # RealSense
     }
-    
+
     if camera_type not in camera_map:
         error_msg = f"Invalid camera_type: '{camera_type}'. Valid options: {list(camera_map.keys())}"
         logger.error(error_msg)
         return f"Error: {error_msg}"
-    
+
     camera_index = camera_map[camera_type]
-    logger.info(f"EXECUTING: get_camera_image(camera_type='{camera_type}', index={camera_index})")
+    logger.info(
+        f"EXECUTING: get_camera_image(camera_type='{camera_type}', index={camera_index})"
+    )
 
     # Initialize camera
     cap = cv2.VideoCapture(camera_index)
@@ -179,7 +189,9 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
 
         # Handle ZED Camera (Side-by-Side Stereo) - only for head camera
         height, width, _ = frame.shape
-        if camera_type == "head" and width > height * 1.8:  # Simple heuristic for side-by-side
+        if (
+            camera_type == "head" and width > height * 1.8
+        ):  # Simple heuristic for side-by-side
             # Crop to get just the left eye (first half of width)
             frame = frame[:, : width // 2, :]
             logger.info("Detected stereo image: Cropped to left eye.")
@@ -196,7 +208,9 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
 
         # Save to outputs folder with timestamp
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = get_output_path(f"captured_image_{camera_type}_{timestamp}.jpg", session_id)
+        filename = get_output_path(
+            f"captured_image_{camera_type}_{timestamp}.jpg", session_id
+        )
         img.save(filename)
         logger.info(f"Image from {camera_type} camera saved to {filename}")
 
@@ -886,6 +900,126 @@ def get_trajectory(
     cleaned_text = result.replace("```json", "").replace("```", "").strip()
     plot_msg = plot_trajectory(cleaned_text, session_id)
     return f"Trajectory: {cleaned_text}\n{plot_msg}"
+
+
+@weave.op()
+def log_search_step(step: int, image_path: str, result: str):
+    """Log a search step with image to Weave."""
+    try:
+        img = Image.open(image_path)
+        return {"step": step, "image": img, "result": result}
+    except Exception as e:
+        logger.error(f"Failed to log step to weave: {e}")
+        return str(e)
+
+
+@mcp.tool()
+@weave.op()
+def search_until_found(
+    object_name: str,
+    max_attempts: int = 5,
+    session_id: str = None,
+) -> str:
+    """
+    Loops and searches for an object by moving the camera until it is found.
+    The next move direction is decided dynamically by the vision model if the object is missing.
+
+    Args:
+        object_name: The object to search for (e.g. "red bottle").
+        max_attempts: Maximum number of search steps (default: 5).
+        session_id: Optional session identifier.
+    """
+    logger.info(f"EXECUTING: search_until_found(object='{object_name}')")
+
+    for i in range(max_attempts):
+        logger.info(f"Search Step {i + 1}/{max_attempts}")
+
+        # 1. Detect objects
+        instruction = f"Find the {object_name}"
+        # Always force a new image capture
+        detection_result = detect_objects(
+            instruction=instruction,
+            use_cached_image=False,
+            session_id=session_id,
+        )
+
+        # Log to Weave if visualization exists
+        try:
+            # detection_result often ends with "Visualization saved to path/to/file.jpg"
+            match = re.search(r"Visualization saved to (.*)", detection_result)
+            if match:
+                vis_path = match.group(1).strip()
+                log_search_step(i + 1, vis_path, detection_result)
+            else:
+                # If no visualization msg, try to get latest raw image
+                latest_raw = _get_latest_captured_image_path(session_id)
+                log_search_step(i + 1, latest_raw, detection_result)
+        except Exception as e:
+            logger.warning(f"Could not log step to Weave: {e}")
+
+        # 2. Check if found
+        found = False
+        if "Detections:" in detection_result:
+            try:
+                # Extract JSON list part
+                json_part = detection_result.split("Detections:", 1)[1].strip()
+                # Find the end of the JSON list (closing bracket)
+                end_idx = json_part.rfind("]")
+                if end_idx != -1:
+                    json_str = json_part[: end_idx + 1]
+                    detections = json.loads(json_str)
+
+                    # Check if we have detections
+                    if detections:
+                        logger.info(f"Found objects: {detections}")
+                        return f"Found {object_name} on attempt {i + 1}.\n{detection_result}"
+
+            except Exception as e:
+                logger.warning(f"Failed to parse detections on step {i + 1}: {e}")
+
+        # 3. If not found, ask VLM for next direction
+        if i < max_attempts - 1:
+            logger.info(f"Object not found. Asking agent for next direction...")
+
+            # Get the image we just captured (detect_objects saves it to cache)
+            img_b64 = get_latest_image(session_id)
+            if img_b64.startswith("Error"):
+                logger.warning(
+                    "Could not retrieve image for direction planning. Defaulting to 'right'."
+                )
+                next_direction = "right"
+            else:
+                prompt = f"""
+                You are a Robot Navigation Agent looking for a '{object_name}'.
+                It was NOT found in the current view.
+                Based on the scene, where should the camera move next to find it?
+                Options: 'left', 'right', 'up', 'down', 'turn around'.
+                Return ONLY the direction word.
+                """
+                next_direction = _call_vision_model(
+                    prompt, f"Where should I look for the {object_name}?", img_b64
+                )
+
+                # Clean up response
+                next_direction = (
+                    next_direction.strip()
+                    .lower()
+                    .replace("'", "")
+                    .replace('"', "")
+                    .replace(".", "")
+                )
+                # Fallback if model is chatty
+                valid_directions = ["left", "right", "up", "down", "turn around"]
+                if not any(d in next_direction for d in valid_directions):
+                    logger.warning(
+                        f"Model returned unclear direction: '{next_direction}'. Defaulting to 'right'."
+                    )
+                    next_direction = "right"
+
+            logger.info(f"Agent decided to move: {next_direction}")
+            move_camera(next_direction)
+
+    return f"Could not find {object_name} after {max_attempts} attempts."
 
 
 # TODO: Add code execution tool
