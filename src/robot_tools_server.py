@@ -886,6 +886,8 @@ def detect_objects(
     Return a JSON list of objects: [{"point": [y, x], "label": "object_name"}]
     - y, x are normalized coordinates (0-1000).
     - [0,0] is top-left.
+    - If the requested object is not clearly visible, return an empty list [].
+    - NEVER hallucinate objects. Only report what is clearly visible.
     - Output ONLY raw JSON. No markdown.
     """
 
@@ -1033,6 +1035,29 @@ def log_search_step(step: int, image_path: str, result: str):
         return str(e)
 
 
+def semantic_match_target(target_object: str, detected_labels: list[str]) -> dict:
+    """Uses LLM to semantically match target against detected labels."""
+    if not detected_labels:
+        return {"found": False}
+    try:
+        client = genai.Client(api_key=GOOGLE_API_KEY)
+        prompt = f"""
+        Target: "{target_object}"
+        Candidates: {json.dumps(detected_labels)}
+        Task: Return JSON {{"found": bool, "match": "str"}} if any candidate matches target semantically.
+        Rules: Conservative match. Ignore irrelevant adjectives. No hallucination.
+        """
+        response = client.models.generate_content(
+            model=os.getenv("PERCEPTION_MODEL", "gemini-2.0-flash-exp"),
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        logger.warning(f"Semantic match error: {e}")
+        return {"found": False}
+
+
 @mcp.tool()
 @weave.op()
 def search_until_found(
@@ -1054,8 +1079,8 @@ def search_until_found(
     for i in range(max_attempts):
         logger.info(f"Search Step {i + 1}/{max_attempts}")
 
-        # 1. Detect objects
-        instruction = f"Find the {object_name}"
+        # 1. Detect objects (Object-agnostic)
+        instruction = "Detect all visible objects in the scene"
         # Always force a new image capture
         detection_result = detect_objects(
             instruction=instruction,
@@ -1078,7 +1103,7 @@ def search_until_found(
             logger.warning(f"Could not log step to Weave: {e}")
 
         # 2. Check if found
-        found = False
+        detections = []
         if "Detections:" in detection_result:
             try:
                 # Extract JSON list part
@@ -1088,14 +1113,28 @@ def search_until_found(
                 if end_idx != -1:
                     json_str = json_part[: end_idx + 1]
                     detections = json.loads(json_str)
-
-                    # Check if we have detections
-                    if detections:
-                        logger.info(f"Found objects: {detections}")
-                        return f"Found {object_name} on attempt {i + 1}.\n{detection_result}"
-
             except Exception as e:
                 logger.warning(f"Failed to parse detections on step {i + 1}: {e}")
+
+        if detections:
+            labels = [d.get("label", "") for d in detections]
+            logger.info(f"Visible objects: {labels}")
+
+            # CALL SEMANTIC JUDGE
+            match_result = semantic_match_target(object_name, labels)
+
+            if match_result.get("found"):
+                matched_label = match_result.get("match")
+                logger.info(
+                    f"SEMANTIC MATCH: '{object_name}' matched with '{matched_label}'"
+                )
+                return f"Found {object_name} (matched: {matched_label}) on attempt {i + 1}.\n{detection_result}"
+            else:
+                logger.info(
+                    f"Target '{object_name}' not semantically found in {labels}"
+                )
+        else:
+            logger.info("No objects detected in this view.")
 
         # 3. If not found, ask VLM for next direction
         if i < max_attempts - 1:
