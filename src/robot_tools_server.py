@@ -71,6 +71,10 @@ class ColoredFormatter(logging.Formatter):
         msg = record.getMessage()
         if "EXECUTING:" in msg:
             return f"{Fore.CYAN}{formatted_message}{Style.RESET_ALL}"
+        elif "SUCCESS:" in msg or "SAVED:" in msg:
+            return f"{Fore.GREEN}{formatted_message}{Style.RESET_ALL}"
+        elif "DETECTED:" in msg:
+            return f"{Fore.CYAN}{formatted_message}{Style.RESET_ALL}"
         elif record.levelno >= logging.ERROR:
             return f"{Fore.RED}{formatted_message}{Style.RESET_ALL}"
         elif record.levelno == logging.WARNING:
@@ -194,7 +198,7 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
         ):  # Simple heuristic for side-by-side
             # Crop to get just the left eye (first half of width)
             frame = frame[:, : width // 2, :]
-            logger.info("Detected stereo image: Cropped to left eye.")
+            logger.info("DETECTED: Stereo image - Cropped to left eye.")
 
         # Convert BGR (OpenCV) to RGB (PIL)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -204,7 +208,7 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
         if img.size[0] > 800:
             new_height = int(800 * img.size[1] / img.size[0])
             img = img.resize((800, new_height), Image.Resampling.LANCZOS)
-            logger.info(f"Image resized to 800x{new_height} for optimization")
+            logger.info(f"DETECTED: Image too large, resized to 800x{new_height}")
 
         # Save to outputs folder with timestamp
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -212,7 +216,7 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
             f"captured_image_{camera_type}_{timestamp}.jpg", session_id
         )
         img.save(filename)
-        logger.info(f"Image from {camera_type} camera saved to {filename}")
+        logger.info(f"SAVED: Image from {camera_type} camera saved to {filename}")
         # Save camera/head pose metadata for this captured frame so object coordinates
         # can later be interpreted relative to the camera frame.
         try:
@@ -227,7 +231,7 @@ def get_camera_image(camera_type: str = "head", session_id: str = None) -> str:
             meta_filename = f"{filename}.meta.json"
             with open(meta_filename, "w") as mf:
                 json.dump(meta, mf)
-            logger.info(f"Saved camera metadata to {meta_filename}")
+            logger.info(f"SAVED: Camera metadata to {meta_filename}")
         except Exception as e:
             logger.warning(f"Failed to save camera metadata for {filename}: {e}")
 
@@ -526,7 +530,7 @@ def plot_detections(detections_json: str, session_id: str = None) -> str:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         outfile = get_output_path(f"detection_vis_{timestamp}.jpg", session_id)
         img.save(outfile)
-        logger.info(f"Saved visualization to {outfile}")
+        logger.info(f"SAVED: Visualization to {outfile}")
 
         return f"Visualization saved to {outfile}"
 
@@ -606,7 +610,7 @@ def plot_trajectory(trajectory_json: str, session_id: str = None) -> str:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         outfile = get_output_path(f"trajectory_vis_{timestamp}.jpg", session_id)
         img.save(outfile)
-        logger.info(f"Saved trajectory visualization to {outfile}")
+        logger.info(f"SAVED: Trajectory visualization to {outfile}")
 
         return f"Trajectory plotted and saved to {outfile}"
 
@@ -713,7 +717,7 @@ def plot_bounding_boxes(detections_json: str, session_id: str = None) -> str:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         outfile = get_output_path(f"bounded_boxes_{timestamp}.jpg", session_id)
         img.save(outfile)
-        logger.info(f"Saved visualization to {outfile}")
+        logger.info(f"SAVED: Visualization to {outfile}")
 
         return f"Visualization saved to {outfile}"
 
@@ -930,7 +934,7 @@ def detect_objects(
         meta_outfile = get_output_path(f"detections_meta_{timestamp}.json", session_id)
         with open(meta_outfile, "w") as outf:
             json.dump(detections_meta, outf, indent=2)
-        logger.info(f"Saved detection metadata to {meta_outfile}")
+        logger.info(f"SAVED: Detection metadata to {meta_outfile}")
     except Exception as e:
         logger.warning(f"Failed to save detection metadata: {e}")
 
@@ -1077,7 +1081,7 @@ def search_until_found(
     logger.info(f"EXECUTING: search_until_found(object='{object_name}')")
 
     for i in range(max_attempts):
-        logger.info(f"Search Step {i + 1}/{max_attempts}")
+        logger.info(f"{Fore.YELLOW}Search Step {i + 1}/{max_attempts}{Style.RESET_ALL}")
 
         # 1. Detect objects (Object-agnostic)
         instruction = "Detect all visible objects in the scene"
@@ -1126,7 +1130,7 @@ def search_until_found(
             if match_result.get("found"):
                 matched_label = match_result.get("match")
                 logger.info(
-                    f"SEMANTIC MATCH: '{object_name}' matched with '{matched_label}'"
+                    f"SUCCESS: SEMANTIC MATCH: '{object_name}' matched with '{matched_label}'"
                 )
                 return f"Found {object_name} (matched: {matched_label}) on attempt {i + 1}.\n{detection_result}"
             else:
