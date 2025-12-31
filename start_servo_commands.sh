@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Define commands
-CMD_T1="source /opt/ros/foxy/setup.bash && source install/setup.bash && ros2 launch ros2_total_demo total_demo.launch.py"
-CMD_T2="source /opt/ros/foxy/setup.bash && source install/setup.bash && ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
+CMD_T1="source /opt/ros/foxy/setup.bash && source ~/ros2_ws/install/setup.bash && ros2 launch ros2_total_demo total_demo.launch.py"
+CMD_T2="source /opt/ros/foxy/setup.bash && source ~/ros2_ws/install/setup.bash && ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
 
 # Cleanup function to kill background processes when script is stopped
 cleanup() {
