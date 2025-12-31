@@ -1,28 +1,38 @@
 #!/bin/bash
 
-# Define commands for each tab
-# Tab 1: Total Demo
+# Define commands
 CMD_T1="source /opt/ros/foxy/setup.bash && source install/setup.bash && ros2 launch ros2_total_demo total_demo.launch.py"
-
-# Tab 2: Rosbridge
 CMD_T2="source /opt/ros/foxy/setup.bash && source install/setup.bash && ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
 
-# Check for gnome-terminal (common on Ubuntu ROS setups)
-if command -v gnome-terminal &> /dev/null; then
-    echo "Launching commands in gnome-terminal tabs..."
-    gnome-terminal --window \
-        --tab --title="Total Demo" -- bash -c "$CMD_T1; exec bash" \
-        --tab --title="Rosbridge" -- bash -c "$CMD_T2; exec bash"
-else
-    echo "gnome-terminal not found."
-    echo "Attempting to run commands in background (output will be interleaved)..."
-    
-    echo "Starting Tab 1 (Total Demo)..."
-    bash -c "$CMD_T1" &
-    
-    echo "Starting Tab 2 (Rosbridge)..."
-    bash -c "$CMD_T2" &
-    
-    wait
-fi
+# Cleanup function to kill background processes when script is stopped
+cleanup() {
+    echo ""
+    echo "Stopping ROS nodes..."
+    if [ -n "$PID1" ]; then kill $PID1 2>/dev/null; fi
+    if [ -n "$PID2" ]; then kill $PID2 2>/dev/null; fi
+    exit
+}
 
+# Trap Ctrl+C (SIGINT) and termination signal (SIGTERM)
+trap cleanup SIGINT SIGTERM
+
+echo "Starting Total Demo (background)... Logging to total_demo.log"
+bash -c "$CMD_T1" > total_demo.log 2>&1 &
+PID1=$!
+echo "Started Total Demo with PID: $PID1"
+
+# Small delay to let the first node start up
+sleep 2
+
+echo "Starting Rosbridge (background)... Logging to rosbridge.log"
+bash -c "$CMD_T2" > rosbridge.log 2>&1 &
+PID2=$!
+echo "Started Rosbridge with PID: $PID2"
+
+echo "---------------------------------------------------"
+echo "Processes running in background."
+echo "Press Ctrl+C to stop all processes."
+echo "---------------------------------------------------"
+
+# Wait for processes to finish (keeps script running so trap works)
+wait
