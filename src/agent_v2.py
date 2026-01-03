@@ -200,11 +200,16 @@ class AgentGraph:
             
             full_text = ""
             function_calls = []
+            thought_signature = None
             
             async for chunk in response_stream:
                 # Handle text chunks
                 if chunk.candidates and chunk.candidates[0].content.parts:
                     for part in chunk.candidates[0].content.parts:
+                        # Capture thought signature if present (Gemini 3+)
+                        if hasattr(part, 'thought_signature') and part.thought_signature:
+                            thought_signature = part.thought_signature
+
                         if part.text:
                             text_chunk = part.text
                             full_text += text_chunk
@@ -223,7 +228,15 @@ class AgentGraph:
             # Construct the final content object
             final_parts = []
             if full_text:
-                final_parts.append(types.Part(text=full_text))
+                text_part = types.Part(text=full_text)
+                # If no function calls and we have a thought signature, attach it to text
+                if not function_calls and thought_signature:
+                    # Try setting attribute safely
+                    try:
+                        text_part.thought_signature = thought_signature
+                    except Exception:
+                         pass 
+                final_parts.append(text_part)
             
             # Reconstruct function calls from stream
             # Note: Gemini stream might split function calls or provide them fully. 
@@ -237,8 +250,15 @@ class AgentGraph:
             # Since we might have streamed text AND function calls (rare but possible),
             # we should include both.
             
-            for fc in function_calls:
-                 final_parts.append(types.Part(function_call=fc))
+            for i, fc in enumerate(function_calls):
+                 part = types.Part(function_call=fc)
+                 # Attach thought signature to the first function call
+                 if i == 0 and thought_signature:
+                     try:
+                         part.thought_signature = thought_signature
+                     except Exception:
+                         pass
+                 final_parts.append(part)
                  
             if not final_parts:
                  logger.error("No content returned from Gemini Stream.")

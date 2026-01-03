@@ -256,79 +256,79 @@ def _get_current_camera_position():
     return _CAMERA_STATE
 
 
-@mcp.tool()
-def move_camera(direction: str, pan: int = None, tilt: int = None) -> str:
-    """
-    Simulate moving the camera/robot using servo commands.
+# @mcp.tool()
+# def move_camera(direction: str, pan: int = None, tilt: int = None) -> str:
+#     """
+#     Simulate moving the camera/robot using servo commands.
 
-    Args:
-        direction: Description of where to move (e.g. "left", "right", "up", "down").
-        pan: (Optional) Exact servo value for panning (ID 2). Range 1 (right) to 1000 (left).
-        tilt: (Optional) Exact servo value for tilting (ID 1). Range 1 (down) to 1000 (up).
-    """
-    logger.info(
-        f"EXECUTING: move_camera(direction='{direction}', pan={pan}, tilt={tilt})"
-    )
+#     Args:
+#         direction: Description of where to move (e.g. "left", "right", "up", "down").
+#         pan: (Optional) Exact servo value for panning (ID 2). Range 1 (right) to 1000 (left).
+#         tilt: (Optional) Exact servo value for tilting (ID 1). Range 1 (down) to 1000 (up).
+#     """
+#     logger.info(
+#         f"EXECUTING: move_camera(direction='{direction}', pan={pan}, tilt={tilt})"
+#     )
 
-    # Get current state
-    current_state = _get_current_camera_position()
-    current_pan = current_state["pan"]
-    current_tilt = current_state["tilt"]
-    step_size = 200
+#     # Get current state
+#     current_state = _get_current_camera_position()
+#     current_pan = current_state["pan"]
+#     current_tilt = current_state["tilt"]
+#     step_size = 200
 
-    # Calculate target values if direction string is used
-    target_pan = pan
-    target_tilt = tilt
+#     # Calculate target values if direction string is used
+#     target_pan = pan
+#     target_tilt = tilt
 
-    if target_pan is None and target_tilt is None:
-        direction_lower = direction.lower()
-        if "left" in direction_lower:
-            target_pan = current_pan + step_size  # Left is higher value (towards 1000)
-        elif "right" in direction_lower:
-            target_pan = current_pan - step_size  # Right is lower value (towards 1)
-        else:
-            target_pan = current_pan  # Keep current if not changing
+#     if target_pan is None and target_tilt is None:
+#         direction_lower = direction.lower()
+#         if "left" in direction_lower:
+#             target_pan = current_pan + step_size  # Left is higher value (towards 1000)
+#         elif "right" in direction_lower:
+#             target_pan = current_pan - step_size  # Right is lower value (towards 1)
+#         else:
+#             target_pan = current_pan  # Keep current if not changing
 
-        if "up" in direction_lower:
-            target_tilt = current_tilt + step_size  # Up is higher value (towards 1000)
-        elif "down" in direction_lower:
-            target_tilt = current_tilt - step_size  # Down is lower value (towards 1)
-        else:
-            target_tilt = current_tilt  # Keep current if not changing
+#         if "up" in direction_lower:
+#             target_tilt = current_tilt + step_size  # Up is higher value (towards 1000)
+#         elif "down" in direction_lower:
+#             target_tilt = current_tilt - step_size  # Down is lower value (towards 1)
+#         else:
+#             target_tilt = current_tilt  # Keep current if not changing
 
-        # Clamp values
-        if target_pan is not None:
-            target_pan = max(1, min(1000, target_pan))
-        if target_tilt is not None:
-            target_tilt = max(1, min(1000, target_tilt))
+#         # Clamp values
+#         if target_pan is not None:
+#             target_pan = max(1, min(1000, target_pan))
+#         if target_tilt is not None:
+#             target_tilt = max(1, min(1000, target_tilt))
 
-    # Update global state (Simulated hardware update)
-    if target_pan is not None:
-        _CAMERA_STATE["pan"] = target_pan
-    if target_tilt is not None:
-        _CAMERA_STATE["tilt"] = target_tilt
+#     # Update global state (Simulated hardware update)
+#     if target_pan is not None:
+#         _CAMERA_STATE["pan"] = target_pan
+#     if target_tilt is not None:
+#         _CAMERA_STATE["tilt"] = target_tilt
 
-    # Construct the command log
-    cmd_log = []
-    if target_pan is not None:
-        cmd_log.append(f"Servo ID 2 (Pan): {target_pan} [1=Right, 1000=Left]")
-    if target_tilt is not None:
-        cmd_log.append(f"Servo ID 1 (Tilt): {target_tilt} [1=Down, 1000=Up]")
+#     # Construct the command log
+#     cmd_log = []
+#     if target_pan is not None:
+#         cmd_log.append(f"Servo ID 2 (Pan): {target_pan} [1=Right, 1000=Left]")
+#     if target_tilt is not None:
+#         cmd_log.append(f"Servo ID 1 (Tilt): {target_tilt} [1=Down, 1000=Up]")
 
-    logger.info(
-        f"{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
-    )
-    if cmd_log:
-        for log in cmd_log:
-            logger.info(f"{Fore.YELLOW}  -> {log}{Style.RESET_ALL}")
+#     logger.info(
+#         f"{Fore.YELLOW}--- ACTION REQUIRED: PLEASE ROTATE CAMERA MANUALLY ({direction}) ---{Style.RESET_ALL}"
+#     )
+#     if cmd_log:
+#         for log in cmd_log:
+#             logger.info(f"{Fore.YELLOW}  -> {log}{Style.RESET_ALL}")
 
-    logger.info(
-        f"{Fore.YELLOW}Waiting 5 seconds for manual adjustment...{Style.RESET_ALL}"
-    )
-    time.sleep(5)
-    logger.info(f"{Fore.GREEN}Resuming...{Style.RESET_ALL}")
+#     logger.info(
+#         f"{Fore.YELLOW}Waiting 5 seconds for manual adjustment...{Style.RESET_ALL}"
+#     )
+#     time.sleep(5)
+#     logger.info(f"{Fore.GREEN}Resuming...{Style.RESET_ALL}")
 
-    return f"Camera moved {direction}. New targets: Pan={_CAMERA_STATE['pan']}, Tilt={_CAMERA_STATE['tilt']}."
+#     return f"Camera moved {direction}. New targets: Pan={_CAMERA_STATE['pan']}, Tilt={_CAMERA_STATE['tilt']}."
 
 
 @mcp.tool()
