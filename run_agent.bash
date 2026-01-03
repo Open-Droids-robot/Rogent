@@ -3,6 +3,7 @@
 # Define ROS commands
 CMD_T1="source /opt/ros/foxy/setup.bash && source ~/ros2_ws/install/setup.bash && ros2 launch ros2_total_demo total_demo.launch.py"
 CMD_T2="source /opt/ros/foxy/setup.bash && source ~/ros2_ws/install/setup.bash && ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
+# Note: Do not use VS Code / Cursor terminal for this command, it will cause errors. Use a regular terminal.
 
 # Define agent commands; change to agent.py for the old version
 # Note: Using direct path to python in venv is often more reliable in scripts than sourcing
