@@ -77,10 +77,21 @@ class Synthesizer:
                         os.remove(path)
                     raise
 
+    def _get_kokoro(self):
+        if self.kokoro is None:
+            self.kokoro = Kokoro(self.kokoro_model, self.kokoro_voices)
+        return self.kokoro
+
     async def start_workers(self):
         """Starts the background workers for synthesis and playback."""
         if not self._workers_running:
             self._workers_running = True
+            
+            # Pre-load Kokoro so the first sentence is instant
+            if self.engine == "kokoro":
+                logger.info("Pre-loading Kokoro model...")
+                await asyncio.to_thread(self._get_kokoro)
+            
             asyncio.create_task(self._synthesis_worker())
             asyncio.create_task(self._playback_worker())
             logger.info("Synthesizer workers started.")
@@ -89,16 +100,21 @@ class Synthesizer:
         """Feeds text chunks to the synthesizer. Buffers until a sentence is complete."""
         self.text_buffer += text_chunk
         
-        # Split by sentence endings (. ? ! or newline)
+        # Split by sentence endings (. ? ! or newline) or semi-colons/commas if buffer is long
         # We use a lookbehind to keep the delimiter
-        sentences = re.split(r'(?<=[.?!])\s+', self.text_buffer)
+        parts = []
+        if len(self.text_buffer) > 40:
+             # Split on . ? ! , ; : followed by a space
+             parts = re.split(r'(?<=[.?!,;:—])\s+', self.text_buffer)
+        else:
+             parts = re.split(r'(?<=[.?!])\s+', self.text_buffer)
         
         # The last part might be incomplete, so we keep it in the buffer
-        if len(sentences) > 1:
-            for sentence in sentences[:-1]:
+        if len(parts) > 1:
+            for sentence in parts[:-1]:
                 if sentence.strip():
                     await self.synthesis_queue.put(sentence.strip())
-            self.text_buffer = sentences[-1]
+            self.text_buffer = parts[-1]
         elif self.text_buffer.endswith('\n'): # Handle explicit newlines as breaks
              if self.text_buffer.strip():
                  await self.synthesis_queue.put(self.text_buffer.strip())
@@ -175,8 +191,7 @@ class Synthesizer:
             raise FileNotFoundError("Kokoro model files not found.")
 
         def _generate():
-            if self.kokoro is None:
-                self.kokoro = Kokoro(self.kokoro_model, self.kokoro_voices)
+            self._get_kokoro() # Ensure loaded
             
             samples, sample_rate = self.kokoro.create(text, voice=self.voice, speed=1.0, lang="en-us")
             
