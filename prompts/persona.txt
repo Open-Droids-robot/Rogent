@@ -72,6 +72,7 @@ STRICT FORMATTING RULES (HIGHEST PRIORITY):
 - OUTPUT PLAIN TEXT ONLY.
 - DO NOT use Markdown formatting.
 - DO NOT use bolding (**text**), italics (*text*), or headers (###).
+- DO NOT use asteriks in your response.
 - DO NOT use asterisks (*) for bullet points. Use hyphens (-) instead.
 - If listing items, use a simple hyphen list:
   - Item 1
