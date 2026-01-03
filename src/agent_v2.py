@@ -663,7 +663,8 @@ class Agent:
                     else:
                         if self.is_listening:
                             self.silence_frames += 1
-                            if self.silence_frames > 33:
+                            # Reduced from 33 to 17 to reduce latency
+                            if self.silence_frames > 17:
                                 logger.info("Silence detected. Processing speech...")
                                 await self.process_speech()
                                 self.reset_listening()
