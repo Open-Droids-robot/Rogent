@@ -25,26 +25,32 @@ from audio_manager import AudioManager
 from transcriber import Transcriber
 from synthesizer import Synthesizer
 
-import weave 
+import weave
+import scipy.io.wavfile as wav
+import json
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
 
-weave.init(os.getenv('WEAVE_PROJECT_ID', "open-droids/test-agent-v2"))
+weave.init(os.getenv("WEAVE_PROJECT_ID", "open-droids/test-agent-v2"))
+
 
 @weave.op()
 def trace_image(image: Image.Image, label: str = "tool_image"):
     """Helper to capture images in Weave traces."""
     return "Image Logged"
 
+
 # Configure logging
 init(autoreset=True)
+
 
 class ColoredFormatter(logging.Formatter):
     def format(self, record):
         # Format the message using the standard formatter first
         formatted_message = super().format(record)
-        
+
         # Apply colors based on content
         msg = record.getMessage()
         if "Executing Tool:" in msg:
@@ -54,19 +60,56 @@ class ColoredFormatter(logging.Formatter):
         elif "Text Input:" in msg or "Transcribed:" in msg:
             return f"{Fore.YELLOW}{formatted_message}{Style.RESET_ALL}"
         elif record.levelno >= logging.ERROR:
-             return f"{Fore.RED}{formatted_message}{Style.RESET_ALL}"
+            return f"{Fore.RED}{formatted_message}{Style.RESET_ALL}"
         elif record.levelno == logging.WARNING:
-             return f"{Fore.MAGENTA}{formatted_message}{Style.RESET_ALL}"
-             
+            return f"{Fore.MAGENTA}{formatted_message}{Style.RESET_ALL}"
+
         return formatted_message
 
+
 handler = logging.StreamHandler()
-handler.setFormatter(ColoredFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+handler.setFormatter(
+    ColoredFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
 logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
 logger = logging.getLogger("AgentV2")
 
+
+def save_audio_log(
+    audio_buffer: bytes, session_id: str, transcription: str, timestamp: str = None
+):
+    """Saves the audio buffer to a WAV file in a background thread."""
+    try:
+        # Create output directory
+        output_dir = os.path.join("outputs", session_id)
+        os.makedirs(output_dir, exist_ok=True)
+
+        if not timestamp:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        filename = os.path.join(output_dir, f"{timestamp}_input.wav")
+
+        # Convert audio buffer to int16 numpy array
+        # audio_buffer is raw bytes of int16 samples
+        audio_int16 = np.frombuffer(audio_buffer, dtype=np.int16)
+
+        # Save WAV file
+        wav.write(filename, 16000, audio_int16)
+
+        # Save transcription to JSON file
+        json_filename = os.path.join(output_dir, f"{timestamp}_input.json")
+        with open(json_filename, "w") as f:
+            json.dump({"transcription": transcription}, f, indent=2)
+
+        logger.info(f"Logged audio interaction to {filename}")
+        return filename
+    except Exception as e:
+        logger.error(f"Failed to save audio log: {e}")
+        return None
+
+
 # Configure Gemini with modern SDK
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
     logger.error("GOOGLE_API_KEY not found in .env")
 
@@ -77,91 +120,96 @@ import re
 
 # --- LangGraph State ---
 class AgentState(TypedDict):
-    contents: Annotated[List[Any], operator.add] # Accumulate history (List[types.Content])
-    session_id: str # Carry session ID across graph
+    contents: Annotated[
+        List[Any], operator.add
+    ]  # Accumulate history (List[types.Content])
+    session_id: str  # Carry session ID across graph
+
 
 # --- Helper: Schema Conversion ---
 def mcp_schema_to_gemini_schema(schema: dict) -> types.Schema:
     """Recursively convert a dict schema (MCP/JSON Schema) to types.Schema."""
     if not schema:
         return None
-    
+
     # Extract type and ensure uppercase for Gemini Enum
-    type_val = schema.get('type')
+    type_val = schema.get("type")
     if isinstance(type_val, str):
         type_val = type_val.upper()
-    
+
     # Handle properties recursively
     properties = {}
-    if 'properties' in schema and isinstance(schema['properties'], dict):
-        for k, v in schema['properties'].items():
+    if "properties" in schema and isinstance(schema["properties"], dict):
+        for k, v in schema["properties"].items():
             properties[k] = mcp_schema_to_gemini_schema(v)
-            
+
     # Handle items recursively (for arrays)
     items = None
-    if 'items' in schema and isinstance(schema['items'], dict):
-        items = mcp_schema_to_gemini_schema(schema['items'])
-        
+    if "items" in schema and isinstance(schema["items"], dict):
+        items = mcp_schema_to_gemini_schema(schema["items"])
+
     return types.Schema(
         type=type_val,
-        description=schema.get('description'),
+        description=schema.get("description"),
         properties=properties if properties else None,
-        required=schema.get('required'),
-        items=items
+        required=schema.get("required"),
+        items=items,
     )
+
 
 # --- Agent Graph (Modernized) ---
 from contextlib import AsyncExitStack
 
+
 class AgentGraph:
-    def __init__(self, tool_map: dict, tools_schema: list, synthesizer: Synthesizer = None):
+    def __init__(
+        self, tool_map: dict, tools_schema: list, synthesizer: Synthesizer = None
+    ):
         self.tool_map = tool_map
         self.tools_schema = tools_schema
         self.synthesizer = synthesizer
-        
+
         # Initialize the modern GenAI client
         self.client = genai.Client(api_key=GOOGLE_API_KEY)
-        
+
         # Get model name
-        model_name = os.getenv('GEMINI_MODEL')
+        model_name = os.getenv("GEMINI_MODEL")
         if not model_name:
-             model_name = 'gemini-2.0-flash-exp'
-             
+            model_name = "gemini-2.0-flash-exp"
+
         self.model_name = model_name
         logger.info(f"Using Gemini Model: {model_name}")
-        
+
         # Construct Tool with modern types
-        self.tool_config = types.Tool(
-            function_declarations=self.tools_schema
-        )
-        
+        self.tool_config = types.Tool(function_declarations=self.tools_schema)
+
         # Load System Instruction from files
         try:
             # Determine paths relative to this script
             base_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(base_dir)
             prompts_dir = os.path.join(project_root, "prompts")
-            
-            persona_path = os.path.join(prompts_dir, "persona.txt")
+
+            persona_path = os.path.join(prompts_dir, "CES", "persona.txt")
             perception_path = os.path.join(prompts_dir, "perception.txt")
-            
+
             system_parts = []
-            
+
             # Load persona.txt
             if os.path.exists(persona_path):
                 with open(persona_path, "r") as f:
                     system_parts.append(f.read())
             else:
-                logger.warning("prompts/persona.txt not found, using default.")
+                logger.warning("prompts/CES/persona.txt not found, using default.")
                 system_parts.append("You are a helpful robot assistant named Orin.")
-            
+
             # Load perception.txt
             if os.path.exists(perception_path):
                 with open(perception_path, "r") as f:
                     system_parts.append(f.read())
             else:
                 logger.warning("prompts/perception.txt not found.")
-            
+
             self.system_instruction = "\n\n".join(system_parts)
         except Exception as e:
             logger.error(f"Error loading system instructions: {e}")
@@ -169,45 +217,45 @@ class AgentGraph:
 
         # Build Graph
         builder = StateGraph(AgentState)
-        
+
         builder.add_node("agent", self.agent_node)
         builder.add_node("tools", self.tool_node)
-        
+
         builder.set_entry_point("agent")
-        
+
         builder.add_conditional_edges(
-            "agent",
-            self.should_continue,
-            {"continue": "tools", "end": END}
+            "agent", self.should_continue, {"continue": "tools", "end": END}
         )
-        
+
         builder.add_edge("tools", "agent")
-        
+
         self.graph = builder.compile()
 
     async def agent_node(self, state: AgentState):
-        contents = state['contents']
+        contents = state["contents"]
         try:
             # Use the modern SDK's async API with streaming
             response_stream = await self.client.aio.models.generate_content_stream(
                 model=self.model_name,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
-                    tools=[self.tool_config]
-                )
+                    system_instruction=self.system_instruction, tools=[self.tool_config]
+                ),
             )
-            
+
             full_text = ""
             function_calls = []
             thought_signature = None
-            
+
             async for chunk in response_stream:
                 # Handle text chunks
                 if chunk.candidates and chunk.candidates[0].content.parts:
                     for part in chunk.candidates[0].content.parts:
                         # Capture thought signature if present (Gemini 3+)
-                        if hasattr(part, 'thought_signature') and part.thought_signature:
+                        if (
+                            hasattr(part, "thought_signature")
+                            and part.thought_signature
+                        ):
                             thought_signature = part.thought_signature
 
                         if part.text:
@@ -216,7 +264,7 @@ class AgentGraph:
                             # Feed to synthesizer if available
                             if self.synthesizer:
                                 await self.synthesizer.feed_text(text_chunk)
-                        
+
                         # Handle function calls (accumulate them)
                         if part.function_call:
                             function_calls.append(part.function_call)
@@ -235,52 +283,66 @@ class AgentGraph:
                     try:
                         text_part.thought_signature = thought_signature
                     except Exception:
-                         pass 
+                        pass
                 final_parts.append(text_part)
-            
+
             # Reconstruct function calls from stream
-            # Note: Gemini stream might split function calls or provide them fully. 
+            # Note: Gemini stream might split function calls or provide them fully.
             # In the Python SDK, `part.function_call` in a chunk is usually complete or the SDK handles assembly?
-            # Actually, for function calls, it's safer to rely on the aggregated response if possible, 
-            # but generate_content_stream yields chunks. 
+            # Actually, for function calls, it's safer to rely on the aggregated response if possible,
+            # but generate_content_stream yields chunks.
             # Let's assume the last chunk or the aggregation of parts covers it.
             # A safer approach for function calls in stream is to check if we got any.
-            
+
             # If we have function calls, we need to return them.
             # Since we might have streamed text AND function calls (rare but possible),
             # we should include both.
-            
+
             for i, fc in enumerate(function_calls):
-                 part = types.Part(function_call=fc)
-                 # Attach thought signature to the first function call
-                 if i == 0 and thought_signature:
-                     try:
-                         part.thought_signature = thought_signature
-                     except Exception:
-                         pass
-                 final_parts.append(part)
-                 
+                part = types.Part(function_call=fc)
+                # Attach thought signature to the first function call
+                if i == 0 and thought_signature:
+                    try:
+                        part.thought_signature = thought_signature
+                    except Exception:
+                        pass
+                final_parts.append(part)
+
             if not final_parts:
-                 logger.error("No content returned from Gemini Stream.")
-                 return {"contents": [types.Content(role="model", parts=[types.Part(text="I didn't get a response.")])]}
+                logger.error("No content returned from Gemini Stream.")
+                return {
+                    "contents": [
+                        types.Content(
+                            role="model",
+                            parts=[types.Part(text="I didn't get a response.")],
+                        )
+                    ]
+                }
 
             new_content = types.Content(role="model", parts=final_parts)
             return {"contents": [new_content]}
-            
+
         except Exception as e:
             logger.error(f"Gemini Error: {e}")
-            return {"contents": [types.Content(role="model", parts=[types.Part(text=f"I encountered an error: {e}")])]}
+            return {
+                "contents": [
+                    types.Content(
+                        role="model",
+                        parts=[types.Part(text=f"I encountered an error: {e}")],
+                    )
+                ]
+            }
 
     @weave.op()
     async def tool_node(self, state: AgentState):
-        contents = state['contents']
-        session_id = state.get('session_id')
+        contents = state["contents"]
+        session_id = state.get("session_id")
         last_content = contents[-1]
-        
+
         # Extract parts from the last content (safely handling dict vs object)
         parts = []
         if isinstance(last_content, dict):
-            parts = last_content.get('parts', [])
+            parts = last_content.get("parts", [])
         else:
             parts = last_content.parts
 
@@ -289,51 +351,58 @@ class AgentGraph:
             # Handle both dict and object parts for function_call
             fn_call = None
             if isinstance(part, dict):
-                if 'function_call' in part:
-                    fn_call = part['function_call']
+                if "function_call" in part:
+                    fn_call = part["function_call"]
             else:
-                if hasattr(part, 'function_call') and part.function_call:
+                if hasattr(part, "function_call") and part.function_call:
                     fn_call = part.function_call
-            
+
             if fn_call:
                 # Extract name and args
                 if isinstance(fn_call, dict):
-                    tool_name = fn_call.get('name')
-                    args = fn_call.get('args', {})
+                    tool_name = fn_call.get("name")
+                    args = fn_call.get("args", {})
                 else:
                     tool_name = fn_call.name
-                    args = fn_call.args # In modern SDK, this is likely already a dict
-                
+                    args = fn_call.args  # In modern SDK, this is likely already a dict
+
                 # Ensure args is a dict
                 if not isinstance(args, dict):
-                     # If it's some other object, try to convert (simplistic conversion)
-                     try:
-                         args = dict(args)
-                     except:
-                         pass
+                    # If it's some other object, try to convert (simplistic conversion)
+                    try:
+                        args = dict(args)
+                    except:
+                        pass
 
                 # Handle Hallucinations / Mappings
-                if tool_name == 'search':
+                if tool_name == "search":
                     logger.info("Mapping 'search' tool call to 'search_web'")
-                    tool_name = 'search_web'
-                    if 'queries' in args:
-                        q = args.pop('queries')
+                    tool_name = "search_web"
+                    if "queries" in args:
+                        q = args.pop("queries")
                         if isinstance(q, list):
-                            args['query'] = " ".join(q)
+                            args["query"] = " ".join(q)
                         else:
-                            args['query'] = str(q)
+                            args["query"] = str(q)
 
                 # Inject session_id if available
                 if session_id:
-                     
-                     # Check if it's one of OUR tools that accepts session_id
-                     if tool_name in ["get_camera_image", "plot_detections", "plot_bounding_boxes", 
-                                      "plot_trajectory", "detect_objects", "get_bounded_boxes", 
-                                      "get_trajectory", "understand_scene"]:
-                         args['session_id'] = session_id
-                
+
+                    # Check if it's one of OUR tools that accepts session_id
+                    if tool_name in [
+                        "get_camera_image",
+                        "plot_detections",
+                        "plot_bounding_boxes",
+                        "plot_trajectory",
+                        "detect_objects",
+                        "get_bounded_boxes",
+                        "get_trajectory",
+                        "understand_scene",
+                    ]:
+                        args["session_id"] = session_id
+
                 logger.info(f"Executing Tool: {tool_name} with {args}")
-                
+
                 session = self.tool_map.get(tool_name)
                 if not session:
                     logger.error(f"Tool {tool_name} not found in tool_map.")
@@ -341,7 +410,7 @@ class AgentGraph:
                         types.Part(
                             function_response=types.FunctionResponse(
                                 name=tool_name,
-                                response={'error': f"Tool {tool_name} not found."}
+                                response={"error": f"Tool {tool_name} not found."},
                             )
                         )
                     )
@@ -350,16 +419,22 @@ class AgentGraph:
                 try:
                     result = await session.call_tool(tool_name, arguments=args)
                     result_text = ""
-                    if hasattr(result, 'content') and result.content:
+                    if hasattr(result, "content") and result.content:
                         # Assuming result.content is list of TextContent or similar
                         # MCP content structure
                         if isinstance(result.content, list):
-                             result_text = " ".join([c.text for c in result.content if hasattr(c, 'text')])
+                            result_text = " ".join(
+                                [c.text for c in result.content if hasattr(c, "text")]
+                            )
                         else:
-                             result_text = str(result.content)
-                    
+                            result_text = str(result.content)
+
                     # --- Trace Image for get_camera_image ---
-                    if tool_name == "get_camera_image" and result_text and not result_text.startswith("Error"):
+                    if (
+                        tool_name == "get_camera_image"
+                        and result_text
+                        and not result_text.startswith("Error")
+                    ):
                         try:
                             # result_text is expected to be a base64 string
                             img_bytes = base64.b64decode(result_text)
@@ -368,7 +443,7 @@ class AgentGraph:
                         except Exception as e:
                             logger.warning(f"Failed to trace image: {e}")
                     # --------------------------------
-                    
+
                     # --- Trace Image for Plotting Tools ---
                     # Update this line to include new tools: detect_objects, get_bounded_boxes, get_trajectory
                     plotting_tools = [
@@ -386,18 +461,22 @@ class AgentGraph:
                             # Prefer a "saved to <path>" pattern, fallback to last token.
                             filename = None
                             if isinstance(result_text, str):
-                                m = re.search(r"saved to\\s+(.+)", result_text, flags=re.IGNORECASE)
+                                m = re.search(
+                                    r"saved to\\s+(.+)",
+                                    result_text,
+                                    flags=re.IGNORECASE,
+                                )
                                 if m:
                                     filename = m.group(1).strip()
                                     # If the match contains multiple lines, keep only the first line
                                     filename = filename.splitlines()[0].strip()
                                     # Remove surrounding quotes or trailing punctuation
-                                    filename = filename.strip('\"\\' + " .")
+                                    filename = filename.strip('"\\' + " .")
                                 else:
                                     # Fallback: take last token heuristic
                                     parts = result_text.split()
                                     if parts:
-                                        filename = parts[-1].strip('\"\\' + " .")
+                                        filename = parts[-1].strip('"\\' + " .")
 
                             if filename:
                                 # Resolve relative path to absolute to ensure agent can access it
@@ -408,36 +487,41 @@ class AgentGraph:
                                     try:
                                         img = Image.open(filename)
                                         trace_image(img, label=f"{tool_name}_result")
-                                        logger.info(f"Logged {tool_name} image to Weave: {filename}")
+                                        logger.info(
+                                            f"Logged {tool_name} image to Weave: {filename}"
+                                        )
                                     except Exception as e:
-                                        logger.warning(f"Failed to open/trace image {filename}: {e}")
+                                        logger.warning(
+                                            f"Failed to open/trace image {filename}: {e}"
+                                        )
                                 else:
-                                    logger.warning(f"Could not find file {filename} to log to Weave.")
+                                    logger.warning(
+                                        f"Could not find file {filename} to log to Weave."
+                                    )
                         except Exception as e:
                             logger.warning(f"Failed to trace plot image: {e}")
                     # -------------------------------------
 
                     if tool_name == "get_camera_image":
-                         img_bytes = base64.b64decode(result_text)
-                         blob = types.Blob(mime_type='image/jpeg', data=img_bytes)
-                         
-                         # Add function response AND the image blob
-                         new_parts.append(
-                             types.Part(
-                                 function_response=types.FunctionResponse(
-                                     name=tool_name,
-                                     response={'result': 'Image Captured.'}
-                                 )
-                             )
-                         )
-                         new_parts.append(types.Part(inline_data=blob)) 
-                    else:
-                         # Standard text response
-                         new_parts.append(
+                        img_bytes = base64.b64decode(result_text)
+                        blob = types.Blob(mime_type="image/jpeg", data=img_bytes)
+
+                        # Add function response AND the image blob
+                        new_parts.append(
                             types.Part(
                                 function_response=types.FunctionResponse(
                                     name=tool_name,
-                                    response={'result': result_text}
+                                    response={"result": "Image Captured."},
+                                )
+                            )
+                        )
+                        new_parts.append(types.Part(inline_data=blob))
+                    else:
+                        # Standard text response
+                        new_parts.append(
+                            types.Part(
+                                function_response=types.FunctionResponse(
+                                    name=tool_name, response={"result": result_text}
                                 )
                             )
                         )
@@ -446,84 +530,90 @@ class AgentGraph:
                     new_parts.append(
                         types.Part(
                             function_response=types.FunctionResponse(
-                                name=tool_name,
-                                response={'error': str(e)}
+                                name=tool_name, response={"error": str(e)}
                             )
                         )
                     )
-        
+
         return {"contents": [types.Content(role="function", parts=new_parts)]}
 
     def should_continue(self, state: AgentState):
-        contents = state['contents']
+        contents = state["contents"]
         last_content = contents[-1]
-        
+
         parts = []
         if isinstance(last_content, dict):
-            parts = last_content.get('parts', [])
+            parts = last_content.get("parts", [])
         else:
             parts = last_content.parts
-            
+
         for part in parts:
             if isinstance(part, dict):
-                if 'function_call' in part:
+                if "function_call" in part:
                     return "continue"
             else:
-                if hasattr(part, 'function_call') and part.function_call:
+                if hasattr(part, "function_call") and part.function_call:
                     return "continue"
         return "end"
 
     @weave.op()
-    async def process(self, text: str, history: List[Any], image_data: str = None, session_id: str = None, trace_context: dict = None) -> (str, List[Any]):
+    async def process(
+        self,
+        text: str,
+        history: List[Any],
+        image_data: str = None,
+        session_id: str = None,
+        trace_context: dict = None,
+    ) -> (str, List[Any]):
         """
         Process user input with history and return (response_text, updated_history).
         """
         parts = []
         parts.append(types.Part(text=text))
-        
+
         if image_data:
             try:
                 image_bytes = base64.b64decode(image_data)
                 # Create a Blob for the image
                 blob = types.Blob(
-                    mime_type='image/jpeg', # Defaulting to jpeg, could infer
-                    data=image_bytes
+                    mime_type="image/jpeg",  # Defaulting to jpeg, could infer
+                    data=image_bytes,
                 )
                 parts.append(types.Part(inline_data=blob))
                 logger.info("Attached image to request.")
             except Exception as e:
                 logger.error(f"Failed to process image data: {e}")
-            
+
         # Create new user content as a types.Content object
         new_user_content = types.Content(role="user", parts=parts)
-        
+
         current_contents = history + [new_user_content]
         # Pass session_id into the state
         inputs = {"contents": current_contents, "session_id": session_id}
-        
+
         final_state = await self.graph.ainvoke(inputs)
-        
+
         # The final state 'contents' contains the full history
-        updated_history = final_state['contents']
-        
+        updated_history = final_state["contents"]
+
         # Extract text from the last message
         last_content = updated_history[-1]
         final_text = ""
-        
+
         parts = []
         if isinstance(last_content, dict):
-            parts = last_content.get('parts', [])
+            parts = last_content.get("parts", [])
         else:
             parts = last_content.parts
-            
+
         for part in parts:
             if isinstance(part, dict):
-                if 'text' in part:
-                    final_text += part['text']
+                if "text" in part:
+                    final_text += part["text"]
             else:
-                if hasattr(part, 'text') and part.text:
+                if hasattr(part, "text") and part.text:
                     final_text += part.text
-                
+
         return final_text, updated_history
 
 
@@ -531,48 +621,52 @@ class AgentGraph:
 class Agent:
     def __init__(self, robot_name="Orin"):
         self.robot_name = robot_name
-        self.session_id = str(uuid.uuid4()) # Generate unique ID for this entire run
-        
+        self.session_id = str(uuid.uuid4())  # Generate unique ID for this entire run
+
         self.audio = AudioManager()
-        self.transcriber = Transcriber(model_size="tiny.en", device="cpu", compute_type="int8")
+        self.transcriber = Transcriber(
+            model_size="tiny.en", device="cpu", compute_type="int8"
+        )
         self.synthesizer = Synthesizer(engine="kokoro", voice="am_echo")
-        self.graph = None 
-        
+        self.graph = None
+
         self.audio_buffer = bytearray()
         self.silence_frames = 0
         self.is_listening = False
-        
-        self.history = [] # Maintain conversation history
-        
+
+        self.history = []  # Maintain conversation history
+
     async def run(self):
-        logger.info(f"Starting Agent V2 {self.robot_name} (LangGraph + Modern GenAI SDK + Multi-Server MCP)...")
+        logger.info(
+            f"Starting Agent V2 {self.robot_name} (LangGraph + Modern GenAI SDK + Multi-Server MCP)..."
+        )
         self.audio.start()
-        
+
         # Start Synthesizer Workers
         await self.synthesizer.start_workers()
-        
+
         # Determine paths relative to this script
         base_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(base_dir)
-        
+
         robot_server_path = os.path.join(base_dir, "robot_tools_server.py")
         ros_server_path = os.path.join(project_root, "ros-mcp-server", "server.py")
-        
+
         # Define servers to connect to
         servers = {
             "local": {
                 "command": sys.executable,
                 "args": [robot_server_path],
-                "env": {**os.environ.copy(), "PYTHONPATH": base_dir}
+                "env": {**os.environ.copy(), "PYTHONPATH": base_dir},
             },
             "ros": {
                 "command": sys.executable,
-                "args": [ros_server_path], 
+                "args": [ros_server_path],
                 "env": {
                     **os.environ.copy(),
-                    "PYTHONPATH": os.path.join(project_root, "ros-mcp-server")
-                }
-            }
+                    "PYTHONPATH": os.path.join(project_root, "ros-mcp-server"),
+                },
+            },
         }
 
         async with AsyncExitStack() as stack:
@@ -583,55 +677,69 @@ class Agent:
                 logger.info(f"Connecting to {name} MCP server...")
                 # Verify file exists before connecting
                 if not os.path.exists(config["args"][0]):
-                    logger.warning(f"Server script not found at {config['args'][0]}. Skipping {name} server.")
+                    logger.warning(
+                        f"Server script not found at {config['args'][0]}. Skipping {name} server."
+                    )
                     continue
 
                 try:
                     server_params = StdioServerParameters(
                         command=config["command"],
                         args=config["args"],
-                        env=config["env"]
+                        env=config["env"],
                     )
-                    
+
                     # Create client (stdio_client returns a context manager)
-                    read, write = await stack.enter_async_context(stdio_client(server_params))
-                    session = await stack.enter_async_context(ClientSession(read, write))
+                    read, write = await stack.enter_async_context(
+                        stdio_client(server_params)
+                    )
+                    session = await stack.enter_async_context(
+                        ClientSession(read, write)
+                    )
                     await session.initialize()
-                    
+
                     # List tools
                     result = await session.list_tools()
-                    logger.info(f"Connected to {name} server. Found {len(result.tools)} tools.")
-                    
+                    logger.info(
+                        f"Connected to {name} server. Found {len(result.tools)} tools."
+                    )
+
                     for tool in result.tools:
                         logger.info(f"  - Adding tool: {tool.name} (from {name})")
                         tool_map[tool.name] = session
-                        
+
                         # Convert MCP tool inputSchema to Gemini Schema
                         gemini_schema = None
                         if tool.inputSchema:
-                             gemini_schema = mcp_schema_to_gemini_schema(tool.inputSchema)
+                            gemini_schema = mcp_schema_to_gemini_schema(
+                                tool.inputSchema
+                            )
 
                         # Use modern types.FunctionDeclaration
                         # parameters expects a types.Schema object
                         fd = types.FunctionDeclaration(
                             name=tool.name,
                             description=tool.description,
-                            parameters=gemini_schema
+                            parameters=gemini_schema,
                         )
                         tools_schema.append(fd)
-                        
+
                 except Exception as e:
                     logger.error(f"Failed to connect to {name} server: {e}")
 
             if not tool_map:
-                logger.error("No tools loaded! Please check if server scripts exist and are running.")
+                logger.error(
+                    "No tools loaded! Please check if server scripts exist and are running."
+                )
                 # We can continue but agent won't have tools
-                
+
             # Initialize Graph with aggregated tools AND synthesizer
-            self.graph = AgentGraph(tool_map, tools_schema, synthesizer=self.synthesizer)
-            
+            self.graph = AgentGraph(
+                tool_map, tools_schema, synthesizer=self.synthesizer
+            )
+
             logger.info("Agent V2 is READY. Speak into the microphone or type text.")
-            
+
             while True:
                 # Check stdin
                 try:
@@ -647,13 +755,15 @@ class Agent:
 
                 while not self.audio.audio_queue.empty():
                     frame_bytes = self.audio.audio_queue.get()
-                    
+
                     # Skip processing if speaking
                     if self.synthesizer.is_speaking:
                         continue
 
-                    is_speech = self.audio.vad.is_speech(frame_bytes, self.audio.sample_rate)
-                    
+                    is_speech = self.audio.vad.is_speech(
+                        frame_bytes, self.audio.sample_rate
+                    )
+
                     if is_speech:
                         if not self.is_listening:
                             logger.info("Speech detected...")
@@ -668,7 +778,7 @@ class Agent:
                                 logger.info("Silence detected. Processing speech...")
                                 await self.process_speech()
                                 self.reset_listening()
-                
+
                 await asyncio.sleep(0.01)
 
     def reset_listening(self):
@@ -677,41 +787,98 @@ class Agent:
         self.silence_frames = 0
 
     async def process_speech(self):
-        audio_data = np.frombuffer(self.audio_buffer, dtype=np.int16).flatten().astype(np.float32) / 32768.0
+        audio_data = (
+            np.frombuffer(self.audio_buffer, dtype=np.int16)
+            .flatten()
+            .astype(np.float32)
+            / 32768.0
+        )
         text = self.transcriber.transcribe(audio_data)
         if not text:
             return
-            
-        logger.info(f"Transcribed: '{text}'")
-        await self.process_input(text)
 
-    async def process_input(self, text):
+        logger.info(f"Transcribed: '{text}'")
+
+        # Save audio log in background
+        buffer_copy = bytes(self.audio_buffer)
+
+        # Define a wrapper to capture the filename and log to weave
+        def save_and_log():
+            filename = save_audio_log(buffer_copy, self.session_id, text)
+            if filename:
+                # Weave logging would ideally happen here or we pass the path back.
+                # Since this is a background thread, we can't easily await weave.op if it's async,
+                # but weave.publish / log is usually sync or handles itself.
+                # Let's add a structured log to the current span if possible,
+                # but since we are outside the process() op, we might not be in a span.
+                # Alternatively, we pass the filename to process_input to log it there.
+                return filename
+            return None
+
+        # We will run the save, but to log to weave correctly in the trace of 'process',
+        # we should probably pass the filename INTO process_input.
+        # But saving is slow(ish), so we want it background.
+        # Strategy: Start the save task, and pass a "future" or just the expected path to process_input.
+
+        # Actually, let's just compute the path deterministically or await it if it's fast enough.
+        # Given the user wants to trace it, it's best to have it in the trace.
+        # We can just fire the background task and assume it succeeds,
+        # and log the *intended* path to Weave.
+
+        # Let's generate the filename in the main thread to log it, then save in background.
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # We need to replicate the path logic briefly or just return it from a helper
+        # Let's keep it simple: run the save, and if we want it in the trace,
+        # we can pass it as metadata to process_input.
+
+        # To strictly follow "no lag", we can't await the disk write.
+        # We will log the *intent* to save to Weave.
+
+        output_dir = os.path.join("outputs", self.session_id)
+        expected_wav_path = os.path.join(output_dir, f"{timestamp}_input.wav")
+
+        # Start background save
+        asyncio.create_task(
+            asyncio.to_thread(
+                save_audio_log, buffer_copy, self.session_id, text, timestamp
+            )
+        )
+
+        await self.process_input(text, audio_log_path=expected_wav_path)
+
+    @weave.op()
+    async def process_input(self, text, audio_log_path=None):
         try:
             if not self.graph:
-                 await self.speak("I am not fully initialized yet.")
-                 return
+                await self.speak("I am not fully initialized yet.")
+                return
 
             # Prepare metadata for Weave tracing
             trace_context = {
                 "model_name": self.graph.model_name,
-                "system_instruction": self.graph.system_instruction
+                "system_instruction": self.graph.system_instruction,
             }
+
+            if audio_log_path:
+                trace_context["audio_input_file"] = audio_log_path
 
             # Pass history, session_id, and trace_context to process
             response_text, updated_history = await self.graph.process(
-                text, 
-                self.history, 
+                text,
+                self.history,
                 session_id=self.session_id,
-                trace_context=trace_context
+                trace_context=trace_context,
             )
-            
+
             # Update history
             self.history = updated_history
-            
+
             logger.info(f"Agent Response: {response_text}")
-            
+
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             logger.error(f"Graph Execution Error: {e}")
             await self.speak("I encountered an error.")
